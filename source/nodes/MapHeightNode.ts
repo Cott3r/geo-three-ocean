@@ -1,11 +1,11 @@
-import {Material, MeshPhongMaterial, BufferGeometry, Vector3, Raycaster, Intersection} from 'three';
-import {MapNodeGeometry} from '../geometries/MapNodeGeometry';
-import {MapNode, QuadTreePosition} from './MapNode';
-import {MapPlaneNode} from './MapPlaneNode';
-import {UnitsUtils} from '../utils/UnitsUtils';
-import {MapView} from '../MapView';
-import {MapNodeHeightGeometry} from '../geometries/MapNodeHeightGeometry';
-import {CanvasUtils} from '../utils/CanvasUtils';
+import { Material, MeshPhongMaterial, BufferGeometry, Vector3, Raycaster, Intersection } from 'three';
+import { MapNodeGeometry } from '../geometries/MapNodeGeometry';
+import { MapNode, QuadTreePosition } from './MapNode';
+import { MapPlaneNode } from './MapPlaneNode';
+import { UnitsUtils } from '../utils/UnitsUtils';
+import { MapView } from '../MapView';
+import { MapNodeHeightGeometry } from '../geometries/MapNodeHeightGeometry';
+import { CanvasUtils } from '../utils/CanvasUtils';
 
 /**
  * Represents a height map tile node that can be subdivided into other height nodes.
@@ -14,8 +14,7 @@ import {CanvasUtils} from '../utils/CanvasUtils';
  *
  * The height node is designed to use MapBox elevation tile encoded data as described in https://www.mapbox.com/help/access-elevation-data/
  */
-export class MapHeightNode extends MapNode 
-{
+export class MapHeightNode extends MapNode {
 	/**
 	 * Flag indicating if the tile height data was loaded.
 	 */
@@ -68,8 +67,7 @@ export class MapHeightNode extends MapNode
 	 * @param material - Material used to render this height node.
 	 * @param geometry - Geometry used to render this height node.
 	 */
-	public constructor(parentNode: MapHeightNode = null, mapView: MapView = null, location: number = QuadTreePosition.root, level: number = 0, x: number = 0, y: number = 0, geometry: BufferGeometry = MapHeightNode.geometry, material: Material = new MeshPhongMaterial({wireframe: false, color: 0xffffff})) 
-	{
+	public constructor(parentNode: MapHeightNode = null, mapView: MapView = null, location: number = QuadTreePosition.root, level: number = 0, x: number = 0, y: number = 0, geometry: BufferGeometry = MapHeightNode.geometry, material: Material = new MeshPhongMaterial({ wireframe: false, color: 0xffffff })) {
 		super(parentNode, mapView, location, level, x, y, geometry, material);
 
 		this.isMesh = true;
@@ -77,10 +75,9 @@ export class MapHeightNode extends MapNode
 		this.matrixAutoUpdate = false;
 	}
 
-	public async initialize(): Promise<void> 
-	{
+	public async initialize(): Promise<void> {
 		super.initialize();
-		
+
 		await this.loadData();
 		await this.loadHeightGeometry();
 
@@ -92,10 +89,9 @@ export class MapHeightNode extends MapNode
 	 *
 	 * Aditionally in this height node it loads elevation data from the height provider and generate the appropiate maps.
 	 */
-	public async loadData(): Promise<void> 
-	{
+	public async loadData(): Promise<void> {
 		await super.loadData();
-		
+
 		this.textureLoaded = true;
 	}
 
@@ -104,27 +100,22 @@ export class MapHeightNode extends MapNode
 	 *
 	 * @returns Returns a promise indicating when the geometry generation has finished.
 	 */
-	public async loadHeightGeometry(): Promise<any> 
-	{
-		if (this.mapView.heightProvider === null) 
-		{
+	public async loadHeightGeometry(): Promise<any> {
+		if (this.mapView.heightProvider === null) {
 			throw new Error('GeoThree: MapView.heightProvider provider is null.');
 		}
- 
-		if (this.level < this.mapView.heightProvider.minZoom || this.level > this.mapView.heightProvider.maxZoom)
-		{
+
+		if (this.level < this.mapView.heightProvider.minZoom || this.level > this.mapView.heightProvider.maxZoom) {
 			console.warn('Geo-Three: Loading tile outside of provider range.', this);
 
 			this.geometry = MapPlaneNode.baseGeometry;
 			return;
 		}
 
-		try 
-		{
+		try {
 			const image = await this.mapView.heightProvider.fetchTile(this.level, this.x, this.y);
- 
-			if (this.disposed) 
-			{
+
+			if (this.disposed) {
 				return;
 			}
 
@@ -138,21 +129,18 @@ export class MapHeightNode extends MapNode
 
 			this.geometry = new MapNodeHeightGeometry(1, 1, this.geometrySize, this.geometrySize, true, 10.0, imageData, true);
 		}
-		catch (e) 
-		{
-			if (this.disposed) 
-			{
+		catch (e) {
+			if (this.disposed) {
 				return;
 			}
-			
+
 			this.geometry = MapPlaneNode.baseGeometry;
 		}
 
 		this.heightLoaded = true;
 	}
 
-	public createChildNodes(): void 
-	{
+	public createChildNodes(): void {
 		const level = this.level + 1;
 		const Constructor = Object.getPrototypeOf(this).constructor;
 
@@ -190,10 +178,8 @@ export class MapHeightNode extends MapNode
 	/**
 	 * Overrides normal raycasting, to avoid raycasting when isMesh is set to false.
 	 */
-	public raycast(raycaster: Raycaster, intersects: Intersection[]): void
-	{
-		if (this.isMesh === true) 
-		{
+	public raycast(raycaster: Raycaster, intersects: Intersection[]): void {
+		if (this.isMesh === true) {
 			super.raycast(raycaster, intersects);
 		}
 	}

@@ -1,4 +1,4 @@
-import {BufferGeometry, Float32BufferAttribute} from 'three';
+import { BufferGeometry, Float32BufferAttribute } from 'three';
 
 /**
  * Map node geometry is a geometry used to represent the map nodes.
@@ -9,8 +9,7 @@ import {BufferGeometry, Float32BufferAttribute} from 'three';
  * 
  * Geometry can also include skirts to mask off missalignments between tiles.
  */
-export class MapNodeGeometry extends BufferGeometry
-{
+export class MapNodeGeometry extends BufferGeometry {
 	/**
 	 * Map node geometry constructor.
 	 *
@@ -20,8 +19,7 @@ export class MapNodeGeometry extends BufferGeometry
 	 * @param heightSegments - Number of subdivisions along the height.
 	 * @param skirt - Skirt around the plane to mask gaps between tiles.
 	 */
-	public constructor(width: number = 1.0, height: number = 1.0, widthSegments: number = 1.0, heightSegments: number = 1.0, skirt: boolean = false, skirtDepth: number = 10.0)
-	{
+	public constructor(width: number = 1.0, height: number = 1.0, widthSegments: number = 1.0, heightSegments: number = 1.0, skirt: boolean = false, skirtDepth: number = 10.0) {
 		super();
 
 		// Buffers
@@ -35,8 +33,7 @@ export class MapNodeGeometry extends BufferGeometry
 		MapNodeGeometry.buildPlane(width, height, widthSegments, heightSegments, indices, vertices, normals, uvs);
 
 		// Generate the skirt
-		if (skirt)
-		{
+		if (skirt) {
 			MapNodeGeometry.buildSkirt(width, height, widthSegments, heightSegments, skirtDepth, indices, vertices, normals, uvs);
 		}
 
@@ -46,8 +43,7 @@ export class MapNodeGeometry extends BufferGeometry
 		this.setAttribute('uv', new Float32BufferAttribute(uvs, 2));
 	}
 
-	public static buildPlane(width: number = 1.0, height: number = 1.0, widthSegments: number = 1.0, heightSegments: number = 1.0, indices: number[], vertices: number[], normals: number[], uvs: number[]): void
-	{
+	public static buildPlane(width: number = 1.0, height: number = 1.0, widthSegments: number = 1.0, heightSegments: number = 1.0, indices: number[], vertices: number[], normals: number[], uvs: number[]): void {
 		// Half width X 
 		const widthHalf = width / 2;
 
@@ -62,17 +58,15 @@ export class MapNodeGeometry extends BufferGeometry
 
 		// Width of each segment X
 		const segmentWidth = width / widthSegments;
-		
+
 		// Height of each segment Z
 		const segmentHeight = height / heightSegments;
 
 		// Generate vertices, normals and uvs
-		for (let iz = 0; iz < gridZ; iz++) 
-		{
+		for (let iz = 0; iz < gridZ; iz++) {
 			const z = iz * segmentHeight - heightHalf;
 
-			for (let ix = 0; ix < gridX; ix++) 
-			{
+			for (let ix = 0; ix < gridX; ix++) {
 				const x = ix * segmentWidth - widthHalf;
 
 				vertices.push(x, 0, z);
@@ -82,10 +76,8 @@ export class MapNodeGeometry extends BufferGeometry
 		}
 
 		// Indices
-		for (let iz = 0; iz < heightSegments; iz++) 
-		{
-			for (let ix = 0; ix < widthSegments; ix++) 
-			{
+		for (let iz = 0; iz < heightSegments; iz++) {
+			for (let ix = 0; ix < widthSegments; ix++) {
 				const a = ix + gridX * iz;
 				const b = ix + gridX * (iz + 1);
 				const c = ix + 1 + gridX * (iz + 1);
@@ -97,8 +89,7 @@ export class MapNodeGeometry extends BufferGeometry
 		}
 	}
 
-	public static buildSkirt(width: number = 1.0, height: number = 1.0, widthSegments: number = 1.0, heightSegments: number = 1.0, skirtDepth: number, indices: number[], vertices: number[], normals: number[], uvs: number[]): void
-	{
+	public static buildSkirt(width: number = 1.0, height: number = 1.0, widthSegments: number = 1.0, heightSegments: number = 1.0, skirtDepth: number, indices: number[], vertices: number[], normals: number[], uvs: number[]): void {
 		// Half width X 
 		const widthHalf = width / 2;
 
@@ -113,15 +104,14 @@ export class MapNodeGeometry extends BufferGeometry
 
 		// Width of each segment X
 		const segmentWidth = width / widthSegments;
-		
+
 		// Height of each segment Z
 		const segmentHeight = height / heightSegments;
 
 		let start = vertices.length / 3;
 
 		// Down X
-		for (let ix = 0; ix < gridX; ix++) 
-		{
+		for (let ix = 0; ix < gridX; ix++) {
 			const x = ix * segmentWidth - widthHalf;
 			const z = -heightHalf;
 
@@ -131,8 +121,7 @@ export class MapNodeGeometry extends BufferGeometry
 		}
 
 		// Indices
-		for (let ix = 0; ix < widthSegments; ix++) 
-		{
+		for (let ix = 0; ix < widthSegments; ix++) {
 			const a = ix;
 			const d = ix + 1;
 			const b = ix + start;
@@ -143,8 +132,7 @@ export class MapNodeGeometry extends BufferGeometry
 		start = vertices.length / 3;
 
 		// Up X
-		for (let ix = 0; ix < gridX; ix++) 
-		{
+		for (let ix = 0; ix < gridX; ix++) {
 			const x = ix * segmentWidth - widthHalf;
 			const z = heightSegments * segmentHeight - heightHalf;
 
@@ -152,12 +140,11 @@ export class MapNodeGeometry extends BufferGeometry
 			normals.push(0, 1, 0);
 			uvs.push(ix / widthSegments, 0);
 		}
-		
-		// Index of the beginning of the last X row
-		let offset = gridX * gridZ - widthSegments - 1; 
 
-		for (let ix = 0; ix < widthSegments; ix++) 
-		{
+		// Index of the beginning of the last X row
+		let offset = gridX * gridZ - widthSegments - 1;
+
+		for (let ix = 0; ix < widthSegments; ix++) {
 			const a = offset + ix;
 			const d = offset + ix + 1;
 			const b = ix + start;
@@ -168,8 +155,7 @@ export class MapNodeGeometry extends BufferGeometry
 		start = vertices.length / 3;
 
 		// Down Z
-		for (let iz = 0; iz < gridZ; iz++) 
-		{
+		for (let iz = 0; iz < gridZ; iz++) {
 			const z = iz * segmentHeight - heightHalf;
 			const x = - widthHalf;
 
@@ -178,8 +164,7 @@ export class MapNodeGeometry extends BufferGeometry
 			uvs.push(0, 1 - iz / heightSegments);
 		}
 
-		for (let iz = 0; iz < heightSegments; iz++) 
-		{
+		for (let iz = 0; iz < heightSegments; iz++) {
 			const a = iz * gridZ;
 			const d = (iz + 1) * gridZ;
 			const b = iz + start;
@@ -191,8 +176,7 @@ export class MapNodeGeometry extends BufferGeometry
 		start = vertices.length / 3;
 
 		// Up Z
-		for (let iz = 0; iz < gridZ; iz++) 
-		{
+		for (let iz = 0; iz < gridZ; iz++) {
 			const z = iz * segmentHeight - heightHalf;
 			const x = widthSegments * segmentWidth - widthHalf;
 
@@ -202,13 +186,12 @@ export class MapNodeGeometry extends BufferGeometry
 			uvs.push(1.0, 1 - iz / heightSegments);
 		}
 
-		for (let iz = 0; iz < heightSegments; iz++) 
-		{
+		for (let iz = 0; iz < heightSegments; iz++) {
 			const a = iz * gridZ + heightSegments;
 			const d = (iz + 1) * gridZ + heightSegments;
 			const b = iz + start;
 			const c = iz + start + 1;
-			
+
 			indices.push(d, b, a, d, c, b);
 		}
 	}

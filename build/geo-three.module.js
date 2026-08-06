@@ -1,4 +1,4 @@
-import { Texture, RGBAFormat, LinearFilter, Mesh, REVISION, BufferGeometry, Float32BufferAttribute, Vector2, Vector3, MeshBasicMaterial, MeshPhongMaterial, Vector4, ShaderMaterial, Matrix4, Quaternion, TextureLoader, NearestFilter, Raycaster, DoubleSide, Uint32BufferAttribute, Frustum, Color } from 'three';
+import { Texture, RGBAFormat, LinearFilter, Mesh, REVISION, BufferGeometry, Float32BufferAttribute, Vector2, Vector3, MeshBasicMaterial, MeshPhongMaterial, Vector4, ShaderMaterial, Matrix4, Quaternion, TextureLoader, NearestFilter, Raycaster, DoubleSide, Uint32BufferAttribute, Frustum, Box3, Color } from 'three';
 
 /*! *****************************************************************************
 Copyright (c) Microsoft Corporation.
@@ -286,6 +286,7 @@ class MapNodeGeometry extends BufferGeometry {
         }
     }
     static buildSkirt(width = 1.0, height = 1.0, widthSegments = 1.0, heightSegments = 1.0, skirtDepth, indices, vertices, normals, uvs) {
+        var _a, _b, _c, _d;
         const widthHalf = width / 2;
         const heightHalf = height / 2;
         const gridX = widthSegments + 1;
@@ -296,7 +297,9 @@ class MapNodeGeometry extends BufferGeometry {
         for (let ix = 0; ix < gridX; ix++) {
             const x = ix * segmentWidth - widthHalf;
             const z = -heightHalf;
-            vertices.push(x, -skirtDepth, z);
+            const topIdx = ix;
+            const topY = (_a = vertices[topIdx * 3 + 1]) !== null && _a !== void 0 ? _a : 0;
+            vertices.push(x, topY - skirtDepth, z);
             normals.push(0, 1, 0);
             uvs.push(ix / widthSegments, 1);
         }
@@ -311,7 +314,9 @@ class MapNodeGeometry extends BufferGeometry {
         for (let ix = 0; ix < gridX; ix++) {
             const x = ix * segmentWidth - widthHalf;
             const z = heightSegments * segmentHeight - heightHalf;
-            vertices.push(x, -skirtDepth, z);
+            const topIdx = heightSegments * gridX + ix;
+            const topY = (_b = vertices[topIdx * 3 + 1]) !== null && _b !== void 0 ? _b : 0;
+            vertices.push(x, topY - skirtDepth, z);
             normals.push(0, 1, 0);
             uvs.push(ix / widthSegments, 0);
         }
@@ -327,7 +332,9 @@ class MapNodeGeometry extends BufferGeometry {
         for (let iz = 0; iz < gridZ; iz++) {
             const z = iz * segmentHeight - heightHalf;
             const x = -widthHalf;
-            vertices.push(x, -skirtDepth, z);
+            const topIdx = iz * gridX;
+            const topY = (_c = vertices[topIdx * 3 + 1]) !== null && _c !== void 0 ? _c : 0;
+            vertices.push(x, topY - skirtDepth, z);
             normals.push(0, 1, 0);
             uvs.push(0, 1 - iz / heightSegments);
         }
@@ -342,7 +349,9 @@ class MapNodeGeometry extends BufferGeometry {
         for (let iz = 0; iz < gridZ; iz++) {
             const z = iz * segmentHeight - heightHalf;
             const x = widthSegments * segmentWidth - widthHalf;
-            vertices.push(x, -skirtDepth, z);
+            const topIdx = iz * gridX + widthSegments;
+            const topY = (_d = vertices[topIdx * 3 + 1]) !== null && _d !== void 0 ? _d : 0;
+            vertices.push(x, topY - skirtDepth, z);
             normals.push(0, 1, 0);
             uvs.push(1.0, 1 - iz / heightSegments);
         }
@@ -594,11 +603,30 @@ class MapHeightNode extends MapNode {
                 if (this.disposed) {
                     return;
                 }
-                const canvas = CanvasUtils.createOffscreenCanvas(this.geometrySize + 1, this.geometrySize + 1);
-                const context = canvas.getContext('2d');
-                context.imageSmoothingEnabled = false;
-                context.drawImage(image, 0, 0, MapHeightNode.tileSize, MapHeightNode.tileSize, 0, 0, canvas.width, canvas.height);
-                const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+                const targetW = this.geometrySize + 1;
+                const targetH = this.geometrySize + 1;
+                const imgWidth = image.width || MapHeightNode.tileSize;
+                const imgHeight = image.height || MapHeightNode.tileSize;
+                const srcCanvas = CanvasUtils.createOffscreenCanvas(imgWidth, imgHeight);
+                const srcContext = srcCanvas.getContext('2d');
+                srcContext.drawImage(image, 0, 0);
+                const srcData = srcContext.getImageData(0, 0, imgWidth, imgHeight).data;
+                const outCanvas = CanvasUtils.createOffscreenCanvas(targetW, targetH);
+                const outContext = outCanvas.getContext('2d');
+                const imageData = outContext.createImageData(targetW, targetH);
+                const outData = imageData.data;
+                for (let iz = 0; iz < targetH; iz++) {
+                    const py = Math.min(imgHeight - 1, Math.max(0, Math.round((iz / (targetH - 1)) * (imgHeight - 1))));
+                    for (let ix = 0; ix < targetW; ix++) {
+                        const px = Math.min(imgWidth - 1, Math.max(0, Math.round((ix / (targetW - 1)) * (imgWidth - 1))));
+                        const srcIdx = (py * imgWidth + px) * 4;
+                        const outIdx = (iz * targetW + ix) * 4;
+                        outData[outIdx] = srcData[srcIdx];
+                        outData[outIdx + 1] = srcData[srcIdx + 1];
+                        outData[outIdx + 2] = srcData[srcIdx + 2];
+                        outData[outIdx + 3] = srcData[srcIdx + 3];
+                    }
+                }
                 this.geometry = new MapNodeHeightGeometry(1, 1, this.geometrySize, this.geometrySize, true, 10.0, imageData, true);
             }
             catch (e) {
@@ -850,7 +878,7 @@ class MapHeightNodeShader extends MapHeightNode {
 			#include <fog_vertex>
 	
 			// Calculate height of the title
-			vec4 _theight = texture2D(heightMap, vUv);
+			vec4 _theight = texture2D(heightMap, vMapUv);
 			float _height = ((_theight.r * 255.0 * 65536.0 + _theight.g * 255.0 * 256.0 + _theight.b * 255.0) * 0.1) - 10000.0;
 			vec3 _transformed = position + _height * normal;
 	
@@ -1393,7 +1421,7 @@ MapMartiniHeightNode.geometry = new MapNodeGeometry(1, 1, 1, 1);
 MapMartiniHeightNode.tileSize = 256;
 
 class MapView extends Mesh {
-    constructor(root = MapView.PLANAR, provider = new OpenStreetMapsProvider(), heightProvider = null) {
+    constructor(root = MapView.PLANAR, provider = new OpenStreetMapsProvider(), heightProvider = null, lod = new LODRaycast()) {
         super(undefined, new MeshBasicMaterial({ transparent: true, opacity: 0.0, depthWrite: false, colorWrite: false }));
         this.lod = null;
         this.provider = null;
@@ -1403,7 +1431,7 @@ class MapView extends Mesh {
         this.onBeforeRender = (renderer, scene, camera, geometry, material, group) => {
             this.lod.updateLOD(this, camera, renderer, scene);
         };
-        this.lod = new LODRaycast();
+        this.lod = lod;
         this.provider = provider;
         this.heightProvider = heightProvider;
         this.setRoot(root);
@@ -1500,20 +1528,49 @@ MapView.mapModes = new Map([
     [MapView.MARTINI, MapMartiniHeightNode]
 ]);
 
-const pov$1 = new Vector3();
-const position$1 = new Vector3();
+const pov$2 = new Vector3();
+const position$2 = new Vector3();
 class LODRadial {
     constructor(subdivideDistance = 50, simplifyDistance = 300) {
         this.subdivideDistance = subdivideDistance;
         this.simplifyDistance = simplifyDistance;
     }
     updateLOD(view, camera, renderer, scene) {
+        camera.getWorldPosition(pov$2);
+        view.children[0].traverse((node) => {
+            node.getWorldPosition(position$2);
+            let distance = pov$2.distanceTo(position$2);
+            distance /= Math.pow(2, view.provider.maxZoom - node.level);
+            if (distance < this.subdivideDistance) {
+                node.subdivide();
+            }
+            else if (distance > this.simplifyDistance && node.parentNode) {
+                node.parentNode.simplify();
+            }
+        });
+    }
+}
+
+const projection$1 = new Matrix4();
+const pov$1 = new Vector3();
+const frustum$1 = new Frustum();
+const position$1 = new Vector3();
+class LODFrustum extends LODRadial {
+    constructor(subdivideDistance = 120, simplifyDistance = 400) {
+        super(subdivideDistance, simplifyDistance);
+        this.testCenter = true;
+        this.pointOnly = false;
+    }
+    updateLOD(view, camera, renderer, scene) {
+        projection$1.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+        frustum$1.setFromProjectionMatrix(projection$1);
         camera.getWorldPosition(pov$1);
         view.children[0].traverse((node) => {
             node.getWorldPosition(position$1);
             let distance = pov$1.distanceTo(position$1);
             distance /= Math.pow(2, view.provider.maxZoom - node.level);
-            if (distance < this.subdivideDistance) {
+            const inFrustum = this.pointOnly ? frustum$1.containsPoint(position$1) : frustum$1.intersectsObject(node);
+            if (distance < this.subdivideDistance && inFrustum) {
                 node.subdivide();
             }
             else if (distance > this.simplifyDistance && node.parentNode) {
@@ -1527,26 +1584,48 @@ const projection = new Matrix4();
 const pov = new Vector3();
 const frustum = new Frustum();
 const position = new Vector3();
-class LODFrustum extends LODRadial {
-    constructor(subdivideDistance = 120, simplifyDistance = 400) {
-        super(subdivideDistance, simplifyDistance);
-        this.testCenter = true;
-        this.pointOnly = false;
-    }
+const zoomLevelPixelRatios = [
+    78271.484, 39135.742, 19567.871, 9783.936, 4891.968, 2445.984, 1222.992,
+    611.496, 305.748, 152.874, 76.437, 38.218, 19.109, 9.555, 4.777, 2.389, 1.194,
+    0.597, 0.299, 0.149, 0.075, 0.037, 0.019
+];
+class LODFrustumOrthographic extends LODFrustum {
     updateLOD(view, camera, renderer, scene) {
+        const isOrthographic = camera.isOrthographicCamera;
+        if (!isOrthographic) {
+            super.updateLOD(view, camera, renderer, scene);
+            return;
+        }
         projection.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
         frustum.setFromProjectionMatrix(projection);
         camera.getWorldPosition(pov);
-        view.children[0].traverse((node) => {
+        view.children[0].traverse((obj) => {
+            var _a;
+            const node = obj;
             node.getWorldPosition(position);
-            let distance = pov.distanceTo(position);
-            distance /= Math.pow(2, view.provider.maxZoom - node.level);
-            const inFrustum = this.pointOnly ? frustum.containsPoint(position) : frustum.intersectsObject(node);
-            if (distance < this.subdivideDistance && inFrustum) {
-                node.subdivide();
-            }
-            else if (distance > this.simplifyDistance && node.parentNode) {
-                node.parentNode.simplify();
+            const nodeBox = new Box3().setFromObject(node);
+            let distance = nodeBox.distanceToPoint(pov);
+            distance /= Math.pow(2, (view.provider.maxZoom - node.level));
+            const inFrustum = frustum.intersectsObject(node);
+            if (inFrustum) {
+                const metresPerPixel = 1 / camera.zoom;
+                let closestZoomLevel = 0;
+                let minDifference = Number.POSITIVE_INFINITY;
+                for (let i = 0; i < zoomLevelPixelRatios.length; i++) {
+                    const difference = Math.abs(zoomLevelPixelRatios[i] - metresPerPixel);
+                    if (difference < minDifference) {
+                        minDifference = difference;
+                        closestZoomLevel = i;
+                    }
+                }
+                if (node.level < closestZoomLevel) {
+                    if (!(node.children.length > 0)) {
+                        node.subdivide();
+                    }
+                }
+                else if (node.level > closestZoomLevel) {
+                    (_a = node.parentNode) === null || _a === void 0 ? void 0 : _a.simplify();
+                }
             }
         });
     }
@@ -1909,6 +1988,31 @@ class HeightDebugProvider extends MapProvider {
     }
 }
 
+class BathymetryProvider extends MapProvider {
+    constructor(address = 'http://localhost:8000/bathymetry') {
+        super();
+        this.name = 'Bathymetry';
+        this.address = address;
+        this.format = 'png';
+        this.minZoom = 0;
+        this.maxZoom = 24;
+    }
+    fetchTile(zoom, x, y) {
+        return new Promise((resolve, reject) => {
+            const image = document.createElement('img');
+            image.onload = function () {
+                resolve(image);
+            };
+            image.onerror = function () {
+                reject();
+            };
+            image.crossOrigin = 'Anonymous';
+            const cleanAddress = this.address.endsWith('/') ? this.address.slice(0, -1) : this.address;
+            image.src = `${cleanAddress}/${zoom}/${x}/${y}.${this.format}`;
+        });
+    }
+}
+
 class GeolocationUtils {
     static get() {
         return new Promise(function (resolve, reject) {
@@ -1999,4 +2103,4 @@ class CancelablePromise {
     }
 }
 
-export { BingMapsProvider, CancelablePromise, CanvasUtils, DebugProvider, Geolocation, GeolocationUtils, GoogleMapsProvider, HeightDebugProvider, HereMapsProvider, LODFrustum, LODRadial, LODRaycast, MapBoxProvider, MapHeightNode, MapHeightNodeShader, MapNode, MapNodeGeometry, MapNodeHeightGeometry, MapPlaneNode, MapProvider, MapSphereNode, MapSphereNodeGeometry, MapTilerProvider, MapView, OpenMapTilesProvider, OpenStreetMapsProvider, QuadTreePosition, TextureUtils, UnitsUtils, XHRUtils };
+export { BathymetryProvider, BingMapsProvider, CancelablePromise, CanvasUtils, DebugProvider, Geolocation, GeolocationUtils, GoogleMapsProvider, HeightDebugProvider, HereMapsProvider, LODFrustum, LODFrustumOrthographic, LODRadial, LODRaycast, MapBoxProvider, MapHeightNode, MapHeightNodeShader, MapNode, MapNodeGeometry, MapNodeHeightGeometry, MapPlaneNode, MapProvider, MapSphereNode, MapSphereNodeGeometry, MapTilerProvider, MapView, OpenMapTilesProvider, OpenStreetMapsProvider, QuadTreePosition, TextureUtils, UnitsUtils, XHRUtils };

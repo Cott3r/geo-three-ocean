@@ -16,6 +16,7 @@ export {OpenMapTilesProvider} from './providers/OpenMapTilesProvider';
 export {OpenStreetMapsProvider} from './providers/OpenStreetMapsProvider';
 export {DebugProvider} from './providers/DebugProvider';
 export {HeightDebugProvider} from './providers/HeightDebugProvider';
+export {BathymetryProvider} from './providers/BathymetryProvider';
 
 export {MapNodeGeometry} from './geometries/MapNodeGeometry';
 export {MapNodeHeightGeometry} from './geometries/MapNodeHeightGeometry';

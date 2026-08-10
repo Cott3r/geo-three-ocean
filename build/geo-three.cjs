@@ -288,7 +288,6 @@ class MapNodeGeometry extends three.BufferGeometry {
         }
     }
     static buildSkirt(width = 1.0, height = 1.0, widthSegments = 1.0, heightSegments = 1.0, skirtDepth, indices, vertices, normals, uvs) {
-        var _a, _b, _c, _d;
         const widthHalf = width / 2;
         const heightHalf = height / 2;
         const gridX = widthSegments + 1;
@@ -299,9 +298,7 @@ class MapNodeGeometry extends three.BufferGeometry {
         for (let ix = 0; ix < gridX; ix++) {
             const x = ix * segmentWidth - widthHalf;
             const z = -heightHalf;
-            const topIdx = ix;
-            const topY = (_a = vertices[topIdx * 3 + 1]) !== null && _a !== void 0 ? _a : 0;
-            vertices.push(x, topY - skirtDepth, z);
+            vertices.push(x, -skirtDepth, z);
             normals.push(0, 1, 0);
             uvs.push(ix / widthSegments, 1);
         }
@@ -316,9 +313,7 @@ class MapNodeGeometry extends three.BufferGeometry {
         for (let ix = 0; ix < gridX; ix++) {
             const x = ix * segmentWidth - widthHalf;
             const z = heightSegments * segmentHeight - heightHalf;
-            const topIdx = heightSegments * gridX + ix;
-            const topY = (_b = vertices[topIdx * 3 + 1]) !== null && _b !== void 0 ? _b : 0;
-            vertices.push(x, topY - skirtDepth, z);
+            vertices.push(x, -skirtDepth, z);
             normals.push(0, 1, 0);
             uvs.push(ix / widthSegments, 0);
         }
@@ -334,9 +329,7 @@ class MapNodeGeometry extends three.BufferGeometry {
         for (let iz = 0; iz < gridZ; iz++) {
             const z = iz * segmentHeight - heightHalf;
             const x = -widthHalf;
-            const topIdx = iz * gridX;
-            const topY = (_c = vertices[topIdx * 3 + 1]) !== null && _c !== void 0 ? _c : 0;
-            vertices.push(x, topY - skirtDepth, z);
+            vertices.push(x, -skirtDepth, z);
             normals.push(0, 1, 0);
             uvs.push(0, 1 - iz / heightSegments);
         }
@@ -351,9 +344,7 @@ class MapNodeGeometry extends three.BufferGeometry {
         for (let iz = 0; iz < gridZ; iz++) {
             const z = iz * segmentHeight - heightHalf;
             const x = widthSegments * segmentWidth - widthHalf;
-            const topIdx = iz * gridX + widthSegments;
-            const topY = (_d = vertices[topIdx * 3 + 1]) !== null && _d !== void 0 ? _d : 0;
-            vertices.push(x, topY - skirtDepth, z);
+            vertices.push(x, -skirtDepth, z);
             normals.push(0, 1, 0);
             uvs.push(1.0, 1 - iz / heightSegments);
         }
@@ -605,30 +596,11 @@ class MapHeightNode extends MapNode {
                 if (this.disposed) {
                     return;
                 }
-                const targetW = this.geometrySize + 1;
-                const targetH = this.geometrySize + 1;
-                const imgWidth = image.width || MapHeightNode.tileSize;
-                const imgHeight = image.height || MapHeightNode.tileSize;
-                const srcCanvas = CanvasUtils.createOffscreenCanvas(imgWidth, imgHeight);
-                const srcContext = srcCanvas.getContext('2d');
-                srcContext.drawImage(image, 0, 0);
-                const srcData = srcContext.getImageData(0, 0, imgWidth, imgHeight).data;
-                const outCanvas = CanvasUtils.createOffscreenCanvas(targetW, targetH);
-                const outContext = outCanvas.getContext('2d');
-                const imageData = outContext.createImageData(targetW, targetH);
-                const outData = imageData.data;
-                for (let iz = 0; iz < targetH; iz++) {
-                    const py = Math.min(imgHeight - 1, Math.max(0, Math.round((iz / (targetH - 1)) * (imgHeight - 1))));
-                    for (let ix = 0; ix < targetW; ix++) {
-                        const px = Math.min(imgWidth - 1, Math.max(0, Math.round((ix / (targetW - 1)) * (imgWidth - 1))));
-                        const srcIdx = (py * imgWidth + px) * 4;
-                        const outIdx = (iz * targetW + ix) * 4;
-                        outData[outIdx] = srcData[srcIdx];
-                        outData[outIdx + 1] = srcData[srcIdx + 1];
-                        outData[outIdx + 2] = srcData[srcIdx + 2];
-                        outData[outIdx + 3] = srcData[srcIdx + 3];
-                    }
-                }
+                const canvas = CanvasUtils.createOffscreenCanvas(this.geometrySize + 1, this.geometrySize + 1);
+                const context = canvas.getContext('2d');
+                context.imageSmoothingEnabled = false;
+                context.drawImage(image, 0, 0, MapHeightNode.tileSize, MapHeightNode.tileSize, 0, 0, canvas.width, canvas.height);
+                const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
                 this.geometry = new MapNodeHeightGeometry(1, 1, this.geometrySize, this.geometrySize, true, 10.0, imageData, true);
             }
             catch (e) {
@@ -2015,6 +1987,252 @@ class BathymetryProvider extends MapProvider {
     }
 }
 
+class EmodnetProvider extends MapProvider {
+    constructor(address = 'https://ows.emodnet-bathymetry.eu/ows', layers = 'emodnet:mean', styles = '', format = 'image/png', service = 'WMS', heightMultiplier = 10.0) {
+        super();
+        this.name = 'Emodnet';
+        this.address = address;
+        this.layers = layers;
+        this.styles = styles;
+        this.format = format;
+        this.service = service;
+        this.heightMultiplier = heightMultiplier;
+        this.crs = 'EPSG:3857';
+        this.minZoom = 0;
+        this.maxZoom = 19;
+    }
+    fetchTile(zoom, x, y) {
+        if (this.service === 'WCS') {
+            return this.fetchWCSTile(zoom, x, y);
+        }
+        return this.fetchWMSTile(zoom, x, y);
+    }
+    fetchWMSTile(zoom, x, y) {
+        return new Promise((resolve, reject) => {
+            const maxExtent = UnitsUtils.WEB_MERCATOR_MAX_EXTENT;
+            const tileSize = (2 * maxExtent) / Math.pow(2, zoom);
+            const minX = -maxExtent + x * tileSize;
+            const maxX = minX + tileSize;
+            const maxY = maxExtent - y * tileSize;
+            const minY = maxY - tileSize;
+            const image = document.createElement('img');
+            image.onload = function () {
+                resolve(image);
+            };
+            image.onerror = function () {
+                reject();
+            };
+            image.crossOrigin = 'Anonymous';
+            let url = this.address;
+            if (!url.includes('?')) {
+                url += '?';
+            }
+            else if (!url.endsWith('?') && !url.endsWith('&')) {
+                url += '&';
+            }
+            const params = new URLSearchParams({
+                SERVICE: 'WMS',
+                VERSION: '1.3.0',
+                REQUEST: 'GetMap',
+                LAYERS: this.layers,
+                STYLES: this.styles,
+                CRS: this.crs,
+                WIDTH: '256',
+                HEIGHT: '256',
+                FORMAT: this.format,
+                TRANSPARENT: 'TRUE',
+                BBOX: `${minX},${minY},${maxX},${maxY}`
+            });
+            image.src = url + params.toString();
+        });
+    }
+    fetchWCSTile(zoom, x, y) {
+        return __awaiter(this, void 0, void 0, function* () {
+            let url = this.address;
+            if (!url.includes('?')) {
+                url += '?';
+            }
+            else if (!url.endsWith('?') && !url.endsWith('&')) {
+                url += '&';
+            }
+            let params;
+            if (zoom >= 7) {
+                const maxExtent = UnitsUtils.WEB_MERCATOR_MAX_EXTENT;
+                const tileSize = (2 * maxExtent) / Math.pow(2, zoom);
+                const minX = -maxExtent + x * tileSize;
+                const maxX = minX + tileSize;
+                const maxY = maxExtent - y * tileSize;
+                const minY = maxY - tileSize;
+                params = new URLSearchParams({
+                    SERVICE: 'WCS',
+                    VERSION: '1.0.0',
+                    REQUEST: 'GetCoverage',
+                    COVERAGE: this.layers,
+                    CRS: 'EPSG:3857',
+                    BBOX: `${minX},${minY},${maxX},${maxY}`,
+                    WIDTH: '256',
+                    HEIGHT: '256',
+                    FORMAT: 'GeoTIFF'
+                });
+            }
+            else {
+                const n = Math.pow(2, zoom);
+                const minLon = (x / n) * 360.0 - 180.0;
+                const maxLon = ((x + 1) / n) * 360.0 - 180.0;
+                const maxLatRad = Math.atan(Math.sinh(Math.PI * (1.0 - 2.0 * y / n)));
+                const maxLat = 180.0 * (maxLatRad / Math.PI);
+                const minLatRad = Math.atan(Math.sinh(Math.PI * (1.0 - 2.0 * (y + 1) / n)));
+                const minLat = 180.0 * (minLatRad / Math.PI);
+                params = new URLSearchParams({
+                    SERVICE: 'WCS',
+                    VERSION: '1.0.0',
+                    REQUEST: 'GetCoverage',
+                    COVERAGE: this.layers,
+                    CRS: 'EPSG:4326',
+                    BBOX: `${minLon},${minLat},${maxLon},${maxLat}`,
+                    WIDTH: '256',
+                    HEIGHT: '256',
+                    FORMAT: 'GeoTIFF'
+                });
+            }
+            try {
+                const response = yield fetch(url + params.toString());
+                if (!response.ok) {
+                    throw new Error(`WCS fetch failed with status ${response.status}`);
+                }
+                const arrayBuffer = yield response.arrayBuffer();
+                const parsed = this.parseGeoTIFFFloat32(arrayBuffer);
+                if (!parsed) {
+                    throw new Error('Failed to parse GeoTIFF mathematical depth data');
+                }
+                const cleanedArray = this.cleanAndFillNoData(parsed.floatArray, parsed.width, parsed.height);
+                return this.encodeHeightToTerrainRGB(cleanedArray, parsed.width, parsed.height);
+            }
+            catch (err) {
+                const canvas = document.createElement('canvas');
+                canvas.width = 256;
+                canvas.height = 256;
+                return canvas;
+            }
+        });
+    }
+    parseGeoTIFFFloat32(arrayBuffer) {
+        if (arrayBuffer.byteLength < 8) {
+            return null;
+        }
+        const dataView = new DataView(arrayBuffer);
+        const magic = dataView.getUint16(0, false);
+        const isBigEndian = magic === 0x4d4d;
+        const isLittleEndian = magic === 0x4949;
+        if (!isBigEndian && !isLittleEndian) {
+            return null;
+        }
+        const littleEndian = isLittleEndian;
+        const ifdOffset = dataView.getUint32(4, littleEndian);
+        if (ifdOffset + 2 > arrayBuffer.byteLength) {
+            return null;
+        }
+        const numEntries = dataView.getUint16(ifdOffset, littleEndian);
+        let dataOffset = 0;
+        let tileWidth = 256;
+        let tileHeight = 256;
+        for (let i = 0; i < numEntries; i++) {
+            const entryOffset = ifdOffset + 2 + i * 12;
+            if (entryOffset + 12 > arrayBuffer.byteLength) {
+                break;
+            }
+            const tag = dataView.getUint16(entryOffset, littleEndian);
+            const type = dataView.getUint16(entryOffset + 2, littleEndian);
+            const count = dataView.getUint32(entryOffset + 4, littleEndian);
+            const rawVal = dataView.getUint32(entryOffset + 8, littleEndian);
+            if (tag === 256) {
+                tileWidth = type === 3 ? (isBigEndian ? (rawVal >>> 16) : (rawVal & 0xffff)) : rawVal;
+            }
+            if (tag === 257) {
+                tileHeight = type === 3 ? (isBigEndian ? (rawVal >>> 16) : (rawVal & 0xffff)) : rawVal;
+            }
+            if (tag === 273 || tag === 324) {
+                dataOffset = (count === 1) ? rawVal : dataView.getUint32(rawVal, littleEndian);
+            }
+        }
+        if (!dataOffset || dataOffset >= arrayBuffer.byteLength) {
+            dataOffset = 384;
+        }
+        const totalPixels = tileWidth * tileHeight;
+        const floatArray = new Float32Array(totalPixels);
+        let ptr = dataOffset;
+        for (let i = 0; i < totalPixels; i++) {
+            if (ptr + 4 <= arrayBuffer.byteLength) {
+                floatArray[i] = dataView.getFloat32(ptr, littleEndian);
+                ptr += 4;
+            }
+            else {
+                floatArray[i] = 0;
+            }
+        }
+        return { floatArray, width: tileWidth, height: tileHeight };
+    }
+    cleanAndFillNoData(floatArray, width, height) {
+        const cleaned = new Float32Array(floatArray.length);
+        let lastValid = 0;
+        for (let i = 0; i < floatArray.length; i++) {
+            const v = floatArray[i];
+            if (!isNaN(v) && v > -100000 && v < 100000) {
+                lastValid = v;
+                break;
+            }
+        }
+        for (let r = 0; r < height; r++) {
+            let rowValid = lastValid;
+            for (let c = 0; c < width; c++) {
+                const v = floatArray[r * width + c];
+                if (!isNaN(v) && v > -100000 && v < 100000) {
+                    rowValid = v;
+                    break;
+                }
+            }
+            let current = rowValid;
+            for (let c = 0; c < width; c++) {
+                const idx = r * width + c;
+                const v = floatArray[idx];
+                if (!isNaN(v) && v > -100000 && v < 100000) {
+                    current = v;
+                }
+                cleaned[idx] = current;
+            }
+            lastValid = current;
+        }
+        return cleaned;
+    }
+    encodeHeightToTerrainRGB(floatArray, width, height) {
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+            return canvas;
+        }
+        const imageData = ctx.createImageData(width, height);
+        const data = imageData.data;
+        for (let i = 0; i < floatArray.length; i++) {
+            const rawDepth = floatArray[i];
+            const depthMeters = rawDepth * this.heightMultiplier;
+            let val = Math.round((depthMeters + 10000) * 10);
+            val = Math.max(0, Math.min(16777215, val));
+            const r = Math.floor(val / 65536) & 0xff;
+            const g = Math.floor(val / 256) & 0xff;
+            const b = val & 0xff;
+            const pxIdx = i * 4;
+            data[pxIdx] = r;
+            data[pxIdx + 1] = g;
+            data[pxIdx + 2] = b;
+            data[pxIdx + 3] = 255;
+        }
+        ctx.putImageData(imageData, 0, 0);
+        return canvas;
+    }
+}
+
 class GeolocationUtils {
     static get() {
         return new Promise(function (resolve, reject) {
@@ -2110,6 +2328,7 @@ exports.BingMapsProvider = BingMapsProvider;
 exports.CancelablePromise = CancelablePromise;
 exports.CanvasUtils = CanvasUtils;
 exports.DebugProvider = DebugProvider;
+exports.EmodnetProvider = EmodnetProvider;
 exports.Geolocation = Geolocation;
 exports.GeolocationUtils = GeolocationUtils;
 exports.GoogleMapsProvider = GoogleMapsProvider;

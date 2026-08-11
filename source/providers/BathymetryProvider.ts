@@ -25,7 +25,7 @@ export class BathymetryProvider extends MapProvider
 		this.address = address;
 		this.format = 'png';
 		this.minZoom = 0;
-		this.maxZoom = 24;
+		this.maxZoom = 15;
 	}
 
 	public fetchTile(zoom: number, x: number, y: number): Promise<any> 

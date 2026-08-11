@@ -1,5 +1,6 @@
 import { MapProvider } from './MapProvider';
 import { UnitsUtils } from '../utils/UnitsUtils';
+import { GeoTiffDecoder } from '../utils/GeoTiffDecoder';
 
 /**
  * EMODnet Bathymetry tile provider.
@@ -197,72 +198,10 @@ export class EmodnetProvider extends MapProvider {
 	}
 
 	/**
-	 * Parse Float32 values from uncompressed/tiled GeoTIFF ArrayBuffer.
+	 * Parse Float32 values from uncompressed/compressed, multi-strip/tiled GeoTIFF ArrayBuffer.
 	 */
 	private parseGeoTIFFFloat32(arrayBuffer: ArrayBuffer): { floatArray: Float32Array; width: number; height: number } | null {
-		if (arrayBuffer.byteLength < 8) {
-			return null;
-		}
-
-		const dataView = new DataView(arrayBuffer);
-		const magic = dataView.getUint16(0, false);
-		const isBigEndian = magic === 0x4d4d;
-		const isLittleEndian = magic === 0x4949;
-		if (!isBigEndian && !isLittleEndian) {
-			return null;
-		}
-
-		const littleEndian = isLittleEndian;
-		const ifdOffset = dataView.getUint32(4, littleEndian);
-		if (ifdOffset + 2 > arrayBuffer.byteLength) {
-			return null;
-		}
-
-		const numEntries = dataView.getUint16(ifdOffset, littleEndian);
-		let dataOffset = 0;
-		let tileWidth = 256;
-		let tileHeight = 256;
-
-		for (let i = 0; i < numEntries; i++) {
-			const entryOffset = ifdOffset + 2 + i * 12;
-			if (entryOffset + 12 > arrayBuffer.byteLength) {
-				break;
-			}
-
-			const tag = dataView.getUint16(entryOffset, littleEndian);
-			const type = dataView.getUint16(entryOffset + 2, littleEndian);
-			const count = dataView.getUint32(entryOffset + 4, littleEndian);
-			const rawVal = dataView.getUint32(entryOffset + 8, littleEndian);
-
-			if (tag === 256) {
-				tileWidth = type === 3 ? (isBigEndian ? (rawVal >>> 16) : (rawVal & 0xffff)) : rawVal;
-			}
-			if (tag === 257) {
-				tileHeight = type === 3 ? (isBigEndian ? (rawVal >>> 16) : (rawVal & 0xffff)) : rawVal;
-			}
-			if (tag === 273 || tag === 324) {
-				dataOffset = (count === 1) ? rawVal : dataView.getUint32(rawVal, littleEndian);
-			}
-		}
-
-		if (!dataOffset || dataOffset >= arrayBuffer.byteLength) {
-			dataOffset = 384;
-		}
-
-		const totalPixels = tileWidth * tileHeight;
-		const floatArray = new Float32Array(totalPixels);
-		let ptr = dataOffset;
-
-		for (let i = 0; i < totalPixels; i++) {
-			if (ptr + 4 <= arrayBuffer.byteLength) {
-				floatArray[i] = dataView.getFloat32(ptr, littleEndian);
-				ptr += 4;
-			} else {
-				floatArray[i] = 0;
-			}
-		}
-
-		return { floatArray, width: tileWidth, height: tileHeight };
+		return GeoTiffDecoder.decodeFloat32(arrayBuffer);
 	}
 
 	/**

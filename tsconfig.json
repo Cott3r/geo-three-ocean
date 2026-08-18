@@ -33,8 +33,9 @@
   ],
   "exclude": [
     "source/examples/**/*",
+    "tests/**/*",
     "node_modules/**/*",
     "docs/**/*",
-    "build/**/*",
+    "build/**/*"
   ]
 }

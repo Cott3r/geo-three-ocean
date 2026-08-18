@@ -17,7 +17,7 @@ export {OpenStreetMapsProvider} from './providers/OpenStreetMapsProvider';
 export {DebugProvider} from './providers/DebugProvider';
 export {HeightDebugProvider} from './providers/HeightDebugProvider';
 export {BathymetryProvider} from './providers/BathymetryProvider';
-export {EmodnetProvider} from './providers/EmodnetProvider';
+export {EmodnetProvider, EmodnetTileProvider, EmodnetWCSProvider} from './providers/EmodnetProvider';
 
 export {MapNodeGeometry} from './geometries/MapNodeGeometry';
 export {MapNodeHeightGeometry} from './geometries/MapNodeHeightGeometry';

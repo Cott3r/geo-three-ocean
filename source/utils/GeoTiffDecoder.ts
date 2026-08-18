@@ -2,10 +2,10 @@
  * Lightweight pure TypeScript GeoTIFF decoder.
  * Supports:
  * - Little Endian (II) & Big Endian (MM) TIFF files
- * - Multi-strip (StripOffsets/StripByteCounts) & Tiled (TileOffsets/TileByteCounts) layouts
- * - Uncompressed (1), LZW (5), and Deflate/ZLIB (8 / 32946) compression
- * - Predictor horizontal differencing (Predictor = 2)
- * - Float32, Int16, UInt16, Float64 sample formats
+ * - Multi-strip & Tiled layouts
+ * - Uncompressed (1), LZW (5), and Deflate/ZLIB (8 / 32946)
+ * - Predictor horizontal differencing (Predictor 2 & 3)
+ * - Float32, Float64, Int16, UInt16, Int8, UInt8 sample formats
  */
 export class GeoTiffDecoder {
 	public static decodeFloat32(arrayBuffer: ArrayBuffer): { floatArray: Float32Array; width: number; height: number } | null {
@@ -48,11 +48,13 @@ export class GeoTiffDecoder {
 			tags[tag] = GeoTiffDecoder.readTagValues(dataView, entryOffset + 8, type, count, littleEndian, arrayBuffer.byteLength);
 		}
 
-		const width = GeoTiffDecoder.getSingleValue(tags[256], 256); // ImageWidth
-		const height = GeoTiffDecoder.getSingleValue(tags[257], 256); // ImageLength
+		const width = GeoTiffDecoder.getSingleValue(tags[256], 0); // ImageWidth
+		const height = GeoTiffDecoder.getSingleValue(tags[257], 0); // ImageLength
+		if (width <= 0 || height <= 0) return null;
+
 		const compression = GeoTiffDecoder.getSingleValue(tags[259], 1); // Compression (1=raw, 5=lzw, 8/32946=deflate)
-		const predictor = GeoTiffDecoder.getSingleValue(tags[317], 1); // Predictor (1=none, 2=horizontal)
-		const sampleFormat = GeoTiffDecoder.getSingleValue(tags[339], 3); // SampleFormat (1=uint, 2=int, 3=float)
+		const predictor = GeoTiffDecoder.getSingleValue(tags[317], 1); // Predictor (1=none, 2=horizontal, 3=floating point)
+		const sampleFormat = GeoTiffDecoder.getSingleValue(tags[339], 1); // SampleFormat (1=uint, 2=int, 3=float)
 		const bitsPerSample = GeoTiffDecoder.getSingleValue(tags[258], 32); // BitsPerSample
 
 		const stripOffsets = GeoTiffDecoder.getArrayValues(tags[273]);
@@ -86,8 +88,8 @@ export class GeoTiffDecoder {
 					const rawTile = GeoTiffDecoder.decompress(compressedBytes, compression, tileWidth * tileLength * bytesPerPixel);
 					if (!rawTile) continue;
 
-					if (predictor === 2) {
-						GeoTiffDecoder.applyHorizontalPredictor(rawTile, tileWidth, tileLength, bytesPerPixel);
+					if (predictor > 1) {
+						GeoTiffDecoder.applyPredictor(rawTile, tileWidth, tileLength, bytesPerPixel, sampleFormat, predictor, littleEndian);
 					}
 
 					const tileDataView = new DataView(rawTile.buffer, rawTile.byteOffset, rawTile.byteLength);
@@ -103,9 +105,9 @@ export class GeoTiffDecoder {
 
 							const srcPixelIdx = tr * tileWidth + tc;
 							const srcByteOffset = srcPixelIdx * bytesPerPixel;
-							const val = GeoTiffDecoder.readPixelValue(tileDataView, srcByteOffset, sampleFormat, bitsPerSample, littleEndian);
-
-							output[r * width + c] = val;
+							if (srcByteOffset + bytesPerPixel <= rawTile.byteLength) {
+								output[r * width + c] = GeoTiffDecoder.readPixelValue(tileDataView, srcByteOffset, sampleFormat, bitsPerSample, littleEndian);
+							}
 						}
 					}
 				}
@@ -128,8 +130,8 @@ export class GeoTiffDecoder {
 				const rawStrip = GeoTiffDecoder.decompress(compressedBytes, compression, expectedBytes);
 				if (!rawStrip) continue;
 
-				if (predictor === 2) {
-					GeoTiffDecoder.applyHorizontalPredictor(rawStrip, width, currentStripRows, bytesPerPixel);
+				if (predictor > 1) {
+					GeoTiffDecoder.applyPredictor(rawStrip, width, currentStripRows, bytesPerPixel, sampleFormat, predictor, littleEndian);
 				}
 
 				const stripDataView = new DataView(rawStrip.buffer, rawStrip.byteOffset, rawStrip.byteLength);
@@ -143,8 +145,7 @@ export class GeoTiffDecoder {
 					const c = p % width;
 					if (r >= height) break;
 
-					const val = GeoTiffDecoder.readPixelValue(stripDataView, byteOff, sampleFormat, bitsPerSample, littleEndian);
-					output[r * width + c] = val;
+					output[r * width + c] = GeoTiffDecoder.readPixelValue(stripDataView, byteOff, sampleFormat, bitsPerSample, littleEndian);
 				}
 			}
 		}
@@ -168,6 +169,8 @@ export class GeoTiffDecoder {
 		const results: number[] = [];
 		for (let i = 0; i < count; i++) {
 			const ptr = valueOffset + i * size;
+			if (ptr + size > totalLength) break;
+
 			if (type === 1 || type === 7) results.push(dataView.getUint8(ptr));
 			else if (type === 3) results.push(dataView.getUint16(ptr, littleEndian));
 			else if (type === 4) results.push(dataView.getUint32(ptr, littleEndian));
@@ -277,7 +280,7 @@ export class GeoTiffDecoder {
 				const prevEntry = dictionary[oldCode];
 				entry = prevEntry.concat(prevEntry[0]);
 			} else {
-				break; // Corrupted code
+				break; // Corrupted stream
 			}
 
 			if (entry) {
@@ -290,7 +293,7 @@ export class GeoTiffDecoder {
 				if (oldCode !== -1 && nextCode < 4096) {
 					const prevEntry = dictionary[oldCode];
 					dictionary[nextCode++] = prevEntry.concat(entry[0]);
-					if (nextCode === (1 << codeSize) - 1 && codeSize < 12) {
+					if (nextCode >= (1 << codeSize) - 1 && codeSize < 12) {
 						codeSize++;
 					}
 				}
@@ -301,12 +304,8 @@ export class GeoTiffDecoder {
 		return out.subarray(0, outIdx);
 	}
 
-	/**
-	 * Deflate / ZLIB Decompressor using pure TS Inflate
-	 */
 	private static decompressDeflate(compressed: Uint8Array, expectedSize: number): Uint8Array {
 		let input = compressed;
-		// Strip ZLIB header if present (0x78 0x9c or similar)
 		if (compressed.length > 2 && (compressed[0] & 0x0f) === 8) {
 			const check = (compressed[0] << 8) | compressed[1];
 			if (check % 31 === 0) {
@@ -321,9 +320,6 @@ export class GeoTiffDecoder {
 		}
 	}
 
-	/**
-	 * Pure TS Raw Deflate Inflate
-	 */
 	private static inflateRaw(compressed: Uint8Array, expectedSize: number): Uint8Array {
 		const out = new Uint8Array(expectedSize > 0 ? expectedSize : compressed.length * 6);
 		let outIdx = 0;
@@ -349,7 +345,6 @@ export class GeoTiffDecoder {
 			const blockType = readBits(2);
 
 			if (blockType === 0) {
-				// Uncompressed block
 				bitBuf = 0;
 				bitCount = 0;
 				if (bytePtr + 4 > compressed.length) break;
@@ -359,15 +354,12 @@ export class GeoTiffDecoder {
 					out[outIdx++] = compressed[bytePtr++];
 				}
 			} else if (blockType === 1 || blockType === 2) {
-				// Huffman coded block (fixed or dynamic)
 				let litTable: number[], distTable: number[];
 
 				if (blockType === 1) {
-					// Fixed Huffman codes
 					litTable = GeoTiffDecoder.buildFixedLitTable();
 					distTable = GeoTiffDecoder.buildFixedDistTable();
 				} else {
-					// Dynamic Huffman codes
 					const hlit = readBits(5) + 257;
 					const hdist = readBits(5) + 1;
 					const hclen = readBits(4) + 4;
@@ -387,14 +379,14 @@ export class GeoTiffDecoder {
 						if (sym < 16) {
 							combinedLengths[idx++] = sym;
 						} else if (sym === 16) {
-							const prev = combinedLengths[idx - 1];
-							const repeat = readBits(2) + 3;
+							const prev = idx > 0 ? combinedLengths[idx - 1] : 0;
+							const repeat = Math.min(readBits(2) + 3, hlit + hdist - idx);
 							for (let r = 0; r < repeat; r++) combinedLengths[idx++] = prev;
 						} else if (sym === 17) {
-							const repeat = readBits(3) + 3;
+							const repeat = Math.min(readBits(3) + 3, hlit + hdist - idx);
 							for (let r = 0; r < repeat; r++) combinedLengths[idx++] = 0;
 						} else if (sym === 18) {
-							const repeat = readBits(7) + 11;
+							const repeat = Math.min(readBits(7) + 11, hlit + hdist - idx);
 							for (let r = 0; r < repeat; r++) combinedLengths[idx++] = 0;
 						}
 					}
@@ -470,7 +462,7 @@ export class GeoTiffDecoder {
 				}
 				ptr = tree[ptr + b];
 			}
-			tree[ptr] = ~i; // Leaf node stores ~symbol
+			tree[ptr] = ~i;
 		}
 		return tree;
 	}
@@ -499,12 +491,73 @@ export class GeoTiffDecoder {
 		return GeoTiffDecoder.fixedDistTable;
 	}
 
-	private static applyHorizontalPredictor(data: Uint8Array, width: number, height: number, bytesPerPixel: number): void {
-		const rowBytes = width * bytesPerPixel;
-		for (let r = 0; r < height; r++) {
-			const rowStart = r * rowBytes;
-			for (let i = bytesPerPixel; i < rowBytes; i++) {
-				data[rowStart + i] = (data[rowStart + i] + data[rowStart + i - bytesPerPixel]) & 0xff;
+	/**
+	 * Typed predictor un-differencing for horizontal predictor (2) & floating-point predictor (3).
+	 */
+	private static applyPredictor(
+		data: Uint8Array,
+		width: number,
+		height: number,
+		bytesPerPixel: number,
+		sampleFormat: number,
+		predictor: number,
+		littleEndian: boolean
+	): void {
+		const dataView = new DataView(data.buffer, data.byteOffset, data.byteLength);
+
+		if (predictor === 2) {
+			// Integer horizontal differencing
+			for (let r = 0; r < height; r++) {
+				const rowOffset = r * width * bytesPerPixel;
+				for (let c = 1; c < width; c++) {
+					const curr = rowOffset + c * bytesPerPixel;
+					const prev = rowOffset + (c - 1) * bytesPerPixel;
+
+					if (bytesPerPixel === 1) {
+						data[curr] = (data[curr] + data[prev]) & 0xff;
+					} else if (bytesPerPixel === 2) {
+						if (sampleFormat === 2) {
+							const val = dataView.getInt16(curr, littleEndian) + dataView.getInt16(prev, littleEndian);
+							dataView.setInt16(curr, val, littleEndian);
+						} else {
+							const val = (dataView.getUint16(curr, littleEndian) + dataView.getUint16(prev, littleEndian)) & 0xffff;
+							dataView.setUint16(curr, val, littleEndian);
+						}
+					} else if (bytesPerPixel === 4) {
+						if (sampleFormat === 3) {
+							// Float32 under Predictor 2 (standard additive difference)
+							const val = dataView.getFloat32(curr, littleEndian) + dataView.getFloat32(prev, littleEndian);
+							dataView.setFloat32(curr, val, littleEndian);
+						} else {
+							const val = (dataView.getUint32(curr, littleEndian) + dataView.getUint32(prev, littleEndian)) >>> 0;
+							dataView.setUint32(curr, val, littleEndian);
+						}
+					}
+				}
+			}
+		} else if (predictor === 3 && sampleFormat === 3) {
+			// Floating point horizontal differencing (TIFF Tech Note 3: bytes are grouped by byte-planes)
+			const rowBytes = width * bytesPerPixel;
+			const tempRow = new Uint8Array(rowBytes);
+
+			for (let r = 0; r < height; r++) {
+				const rowStart = r * rowBytes;
+				// Un-difference byte planes
+				for (let i = 1; i < rowBytes; i++) {
+					data[rowStart + i] = (data[rowStart + i] + data[rowStart + i - 1]) & 0xff;
+				}
+
+				// De-interleave byte planes
+				tempRow.set(data.subarray(rowStart, rowStart + rowBytes));
+				for (let c = 0; c < width; c++) {
+					for (let b = 0; b < bytesPerPixel; b++) {
+						const srcIdx = b * width + c;
+						const dstIdx = littleEndian
+							? c * bytesPerPixel + (bytesPerPixel - 1 - b)
+							: c * bytesPerPixel + b;
+						data[rowStart + dstIdx] = tempRow[srcIdx];
+					}
+				}
 			}
 		}
 	}

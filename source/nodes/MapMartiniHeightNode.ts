@@ -220,16 +220,16 @@ export class MapMartiniHeightNode extends MapHeightNode
 			}
 		}
 
-		// Backfill bottom border
+		// Linear extrapolation for bottom border
 		for (let i = gridSize * (gridSize - 1), x = 0; x < gridSize - 1; x++, i++) 
 		{
-			terrain[i] = terrain[i - gridSize];
+			terrain[i] = 2.0 * terrain[i - gridSize] - terrain[i - 2 * gridSize];
 		}
 
-		// Backfill right border
+		// Linear extrapolation for right border
 		for (let i = gridSize - 1, y = 0; y < gridSize; y++, i += gridSize) 
 		{
-			terrain[i] = terrain[i - 1];
+			terrain[i] = 2.0 * terrain[i - 1] - terrain[i - 2];
 		}
 
 		return terrain;

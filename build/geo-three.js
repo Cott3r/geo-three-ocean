@@ -516,37 +516,57 @@
 	    }
 	    computeNormals(widthSegments, heightSegments) {
 	        const positionAttribute = this.getAttribute('position');
-	        if (positionAttribute !== undefined) {
-	            let normalAttribute = this.getAttribute('normal');
-	            const normalLength = heightSegments * widthSegments;
-	            for (let i = 0; i < normalLength; i++) {
-	                normalAttribute.setXYZ(i, 0, 0, 0);
+	        const normalAttribute = this.getAttribute('normal');
+	        if (positionAttribute !== undefined && normalAttribute !== undefined) {
+	            const gridX = widthSegments + 1;
+	            const gridZ = heightSegments + 1;
+	            const segmentWidth = 1.0 / widthSegments;
+	            const segmentHeight = 1.0 / heightSegments;
+	            const n = new three.Vector3();
+	            for (let iz = 0; iz < gridZ; iz++) {
+	                for (let ix = 0; ix < gridX; ix++) {
+	                    const idx = iz * gridX + ix;
+	                    let dydx;
+	                    if (ix === 0) {
+	                        const yRight = positionAttribute.getY(iz * gridX + 1);
+	                        const yCurr = positionAttribute.getY(idx);
+	                        dydx = (yRight - yCurr) / segmentWidth;
+	                    }
+	                    else if (ix === gridX - 1) {
+	                        const yCurr = positionAttribute.getY(idx);
+	                        const yLeft = positionAttribute.getY(iz * gridX + (gridX - 2));
+	                        dydx = (yCurr - yLeft) / segmentWidth;
+	                    }
+	                    else {
+	                        const yRight = positionAttribute.getY(iz * gridX + (ix + 1));
+	                        const yLeft = positionAttribute.getY(iz * gridX + (ix - 1));
+	                        dydx = (yRight - yLeft) / (2.0 * segmentWidth);
+	                    }
+	                    let dydz;
+	                    if (iz === 0) {
+	                        const yDown = positionAttribute.getY(1 * gridX + ix);
+	                        const yCurr = positionAttribute.getY(idx);
+	                        dydz = (yDown - yCurr) / segmentHeight;
+	                    }
+	                    else if (iz === gridZ - 1) {
+	                        const yCurr = positionAttribute.getY(idx);
+	                        const yUp = positionAttribute.getY((gridZ - 2) * gridX + ix);
+	                        dydz = (yCurr - yUp) / segmentHeight;
+	                    }
+	                    else {
+	                        const yDown = positionAttribute.getY((iz + 1) * gridX + ix);
+	                        const yUp = positionAttribute.getY((iz - 1) * gridX + ix);
+	                        dydz = (yDown - yUp) / (2.0 * segmentHeight);
+	                    }
+	                    n.set(-dydx, 1.0, -dydz).normalize();
+	                    normalAttribute.setXYZ(idx, n.x, n.y, n.z);
+	                }
 	            }
-	            const pA = new three.Vector3(), pB = new three.Vector3(), pC = new three.Vector3();
-	            const nA = new three.Vector3(), nB = new three.Vector3(), nC = new three.Vector3();
-	            const cb = new three.Vector3(), ab = new three.Vector3();
-	            const indexLength = heightSegments * widthSegments * 6;
-	            for (let i = 0; i < indexLength; i += 3) {
-	                const vA = this.index.getX(i + 0);
-	                const vB = this.index.getX(i + 1);
-	                const vC = this.index.getX(i + 2);
-	                pA.fromBufferAttribute(positionAttribute, vA);
-	                pB.fromBufferAttribute(positionAttribute, vB);
-	                pC.fromBufferAttribute(positionAttribute, vC);
-	                cb.subVectors(pC, pB);
-	                ab.subVectors(pA, pB);
-	                cb.cross(ab);
-	                nA.fromBufferAttribute(normalAttribute, vA);
-	                nB.fromBufferAttribute(normalAttribute, vB);
-	                nC.fromBufferAttribute(normalAttribute, vC);
-	                nA.add(cb);
-	                nB.add(cb);
-	                nC.add(cb);
-	                normalAttribute.setXYZ(vA, nA.x, nA.y, nA.z);
-	                normalAttribute.setXYZ(vB, nB.x, nB.y, nB.z);
-	                normalAttribute.setXYZ(vC, nC.x, nC.y, nC.z);
+	            const totalVertices = positionAttribute.count;
+	            const planeVertices = gridX * gridZ;
+	            for (let i = planeVertices; i < totalVertices; i++) {
+	                normalAttribute.setXYZ(i, 0, 1, 0);
 	            }
-	            this.normalizeNormals();
 	            normalAttribute.needsUpdate = true;
 	        }
 	    }
@@ -1315,10 +1335,10 @@
 	            }
 	        }
 	        for (let i = gridSize * (gridSize - 1), x = 0; x < gridSize - 1; x++, i++) {
-	            terrain[i] = terrain[i - gridSize];
+	            terrain[i] = 2.0 * terrain[i - gridSize] - terrain[i - 2 * gridSize];
 	        }
 	        for (let i = gridSize - 1, y = 0; y < gridSize; y++, i += gridSize) {
-	            terrain[i] = terrain[i - 1];
+	            terrain[i] = 2.0 * terrain[i - 1] - terrain[i - 2];
 	        }
 	        return terrain;
 	    }
@@ -2022,11 +2042,13 @@
 	            const count = dataView.getUint32(entryOffset + 4, littleEndian);
 	            tags[tag] = GeoTiffDecoder.readTagValues(dataView, entryOffset + 8, type, count, littleEndian, arrayBuffer.byteLength);
 	        }
-	        const width = GeoTiffDecoder.getSingleValue(tags[256], 256);
-	        const height = GeoTiffDecoder.getSingleValue(tags[257], 256);
+	        const width = GeoTiffDecoder.getSingleValue(tags[256], 0);
+	        const height = GeoTiffDecoder.getSingleValue(tags[257], 0);
+	        if (width <= 0 || height <= 0)
+	            return null;
 	        const compression = GeoTiffDecoder.getSingleValue(tags[259], 1);
 	        const predictor = GeoTiffDecoder.getSingleValue(tags[317], 1);
-	        const sampleFormat = GeoTiffDecoder.getSingleValue(tags[339], 3);
+	        const sampleFormat = GeoTiffDecoder.getSingleValue(tags[339], 1);
 	        const bitsPerSample = GeoTiffDecoder.getSingleValue(tags[258], 32);
 	        const stripOffsets = GeoTiffDecoder.getArrayValues(tags[273]);
 	        const stripByteCounts = GeoTiffDecoder.getArrayValues(tags[279]);
@@ -2054,8 +2076,8 @@
 	                    const rawTile = GeoTiffDecoder.decompress(compressedBytes, compression, tileWidth * tileLength * bytesPerPixel);
 	                    if (!rawTile)
 	                        continue;
-	                    if (predictor === 2) {
-	                        GeoTiffDecoder.applyHorizontalPredictor(rawTile, tileWidth, tileLength, bytesPerPixel);
+	                    if (predictor > 1) {
+	                        GeoTiffDecoder.applyPredictor(rawTile, tileWidth, tileLength, bytesPerPixel, sampleFormat, predictor, littleEndian);
 	                    }
 	                    const tileDataView = new DataView(rawTile.buffer, rawTile.byteOffset, rawTile.byteLength);
 	                    const startY = ty * tileLength;
@@ -2070,8 +2092,9 @@
 	                                break;
 	                            const srcPixelIdx = tr * tileWidth + tc;
 	                            const srcByteOffset = srcPixelIdx * bytesPerPixel;
-	                            const val = GeoTiffDecoder.readPixelValue(tileDataView, srcByteOffset, sampleFormat, bitsPerSample, littleEndian);
-	                            output[r * width + c] = val;
+	                            if (srcByteOffset + bytesPerPixel <= rawTile.byteLength) {
+	                                output[r * width + c] = GeoTiffDecoder.readPixelValue(tileDataView, srcByteOffset, sampleFormat, bitsPerSample, littleEndian);
+	                            }
 	                        }
 	                    }
 	                }
@@ -2093,8 +2116,8 @@
 	                const rawStrip = GeoTiffDecoder.decompress(compressedBytes, compression, expectedBytes);
 	                if (!rawStrip)
 	                    continue;
-	                if (predictor === 2) {
-	                    GeoTiffDecoder.applyHorizontalPredictor(rawStrip, width, currentStripRows, bytesPerPixel);
+	                if (predictor > 1) {
+	                    GeoTiffDecoder.applyPredictor(rawStrip, width, currentStripRows, bytesPerPixel, sampleFormat, predictor, littleEndian);
 	                }
 	                const stripDataView = new DataView(rawStrip.buffer, rawStrip.byteOffset, rawStrip.byteLength);
 	                const totalStripPixels = width * currentStripRows;
@@ -2106,8 +2129,7 @@
 	                    const c = p % width;
 	                    if (r >= height)
 	                        break;
-	                    const val = GeoTiffDecoder.readPixelValue(stripDataView, byteOff, sampleFormat, bitsPerSample, littleEndian);
-	                    output[r * width + c] = val;
+	                    output[r * width + c] = GeoTiffDecoder.readPixelValue(stripDataView, byteOff, sampleFormat, bitsPerSample, littleEndian);
 	                }
 	            }
 	        }
@@ -2127,6 +2149,8 @@
 	        const results = [];
 	        for (let i = 0; i < count; i++) {
 	            const ptr = valueOffset + i * size;
+	            if (ptr + size > totalLength)
+	                break;
 	            if (type === 1 || type === 7)
 	                results.push(dataView.getUint8(ptr));
 	            else if (type === 3)
@@ -2256,7 +2280,7 @@
 	                if (oldCode !== -1 && nextCode < 4096) {
 	                    const prevEntry = dictionary[oldCode];
 	                    dictionary[nextCode++] = prevEntry.concat(entry[0]);
-	                    if (nextCode === (1 << codeSize) - 1 && codeSize < 12) {
+	                    if (nextCode >= (1 << codeSize) - 1 && codeSize < 12) {
 	                        codeSize++;
 	                    }
 	                }
@@ -2337,18 +2361,18 @@
 	                            combinedLengths[idx++] = sym;
 	                        }
 	                        else if (sym === 16) {
-	                            const prev = combinedLengths[idx - 1];
-	                            const repeat = readBits(2) + 3;
+	                            const prev = idx > 0 ? combinedLengths[idx - 1] : 0;
+	                            const repeat = Math.min(readBits(2) + 3, hlit + hdist - idx);
 	                            for (let r = 0; r < repeat; r++)
 	                                combinedLengths[idx++] = prev;
 	                        }
 	                        else if (sym === 17) {
-	                            const repeat = readBits(3) + 3;
+	                            const repeat = Math.min(readBits(3) + 3, hlit + hdist - idx);
 	                            for (let r = 0; r < repeat; r++)
 	                                combinedLengths[idx++] = 0;
 	                        }
 	                        else if (sym === 18) {
-	                            const repeat = readBits(7) + 11;
+	                            const repeat = Math.min(readBits(7) + 11, hlit + hdist - idx);
 	                            for (let r = 0; r < repeat; r++)
 	                                combinedLengths[idx++] = 0;
 	                        }
@@ -2446,12 +2470,58 @@
 	        }
 	        return GeoTiffDecoder.fixedDistTable;
 	    }
-	    static applyHorizontalPredictor(data, width, height, bytesPerPixel) {
-	        const rowBytes = width * bytesPerPixel;
-	        for (let r = 0; r < height; r++) {
-	            const rowStart = r * rowBytes;
-	            for (let i = bytesPerPixel; i < rowBytes; i++) {
-	                data[rowStart + i] = (data[rowStart + i] + data[rowStart + i - bytesPerPixel]) & 0xff;
+	    static applyPredictor(data, width, height, bytesPerPixel, sampleFormat, predictor, littleEndian) {
+	        const dataView = new DataView(data.buffer, data.byteOffset, data.byteLength);
+	        if (predictor === 2) {
+	            for (let r = 0; r < height; r++) {
+	                const rowOffset = r * width * bytesPerPixel;
+	                for (let c = 1; c < width; c++) {
+	                    const curr = rowOffset + c * bytesPerPixel;
+	                    const prev = rowOffset + (c - 1) * bytesPerPixel;
+	                    if (bytesPerPixel === 1) {
+	                        data[curr] = (data[curr] + data[prev]) & 0xff;
+	                    }
+	                    else if (bytesPerPixel === 2) {
+	                        if (sampleFormat === 2) {
+	                            const val = dataView.getInt16(curr, littleEndian) + dataView.getInt16(prev, littleEndian);
+	                            dataView.setInt16(curr, val, littleEndian);
+	                        }
+	                        else {
+	                            const val = (dataView.getUint16(curr, littleEndian) + dataView.getUint16(prev, littleEndian)) & 0xffff;
+	                            dataView.setUint16(curr, val, littleEndian);
+	                        }
+	                    }
+	                    else if (bytesPerPixel === 4) {
+	                        if (sampleFormat === 3) {
+	                            const val = dataView.getFloat32(curr, littleEndian) + dataView.getFloat32(prev, littleEndian);
+	                            dataView.setFloat32(curr, val, littleEndian);
+	                        }
+	                        else {
+	                            const val = (dataView.getUint32(curr, littleEndian) + dataView.getUint32(prev, littleEndian)) >>> 0;
+	                            dataView.setUint32(curr, val, littleEndian);
+	                        }
+	                    }
+	                }
+	            }
+	        }
+	        else if (predictor === 3 && sampleFormat === 3) {
+	            const rowBytes = width * bytesPerPixel;
+	            const tempRow = new Uint8Array(rowBytes);
+	            for (let r = 0; r < height; r++) {
+	                const rowStart = r * rowBytes;
+	                for (let i = 1; i < rowBytes; i++) {
+	                    data[rowStart + i] = (data[rowStart + i] + data[rowStart + i - 1]) & 0xff;
+	                }
+	                tempRow.set(data.subarray(rowStart, rowStart + rowBytes));
+	                for (let c = 0; c < width; c++) {
+	                    for (let b = 0; b < bytesPerPixel; b++) {
+	                        const srcIdx = b * width + c;
+	                        const dstIdx = littleEndian
+	                            ? c * bytesPerPixel + (bytesPerPixel - 1 - b)
+	                            : c * bytesPerPixel + b;
+	                        data[rowStart + dstIdx] = tempRow[srcIdx];
+	                    }
+	                }
 	            }
 	        }
 	    }
@@ -2460,33 +2530,54 @@
 	GeoTiffDecoder.fixedDistTable = null;
 
 	class EmodnetProvider extends MapProvider {
-	    constructor(address = 'https://ows.emodnet-bathymetry.eu/ows', layers = 'emodnet:mean', styles = '', format = 'image/png', service = 'WMS', heightMultiplier = 10.0) {
+	    constructor(address = 'https://tiles.emodnet-bathymetry.eu/2020/baselayer/web_mercator/{z}/{x}/{y}.png', layers = 'emodnet:mean', format = 'image/png', styles = '') {
 	        super();
 	        this.name = 'Emodnet';
 	        this.address = address;
 	        this.layers = layers;
 	        this.styles = styles;
 	        this.format = format;
-	        this.service = service;
-	        this.heightMultiplier = heightMultiplier;
 	        this.crs = 'EPSG:3857';
 	        this.minZoom = 0;
 	        this.maxZoom = 19;
 	    }
-	    fetchTile(zoom, x, y) {
-	        if (this.service === 'WCS') {
-	            return this.fetchWCSTile(zoom, x, y);
+	    getTileUrl(zoom, x, y) {
+	        if (this.address.includes('{z}') || this.address.includes('{x}') || this.address.includes('{y}')) {
+	            return this.address
+	                .replace('{z}', zoom.toString())
+	                .replace('{x}', x.toString())
+	                .replace('{y}', y.toString());
 	        }
-	        return this.fetchWMSTile(zoom, x, y);
+	        let url = this.address;
+	        if (!url.includes('?')) {
+	            url += '?';
+	        }
+	        else if (!url.endsWith('?') && !url.endsWith('&')) {
+	            url += '&';
+	        }
+	        const maxExtent = UnitsUtils.WEB_MERCATOR_MAX_EXTENT;
+	        const tileSize = (2 * maxExtent) / Math.pow(2, zoom);
+	        const minX = -maxExtent + x * tileSize;
+	        const maxX = minX + tileSize;
+	        const maxY = maxExtent - y * tileSize;
+	        const minY = maxY - tileSize;
+	        const params = new URLSearchParams({
+	            SERVICE: 'WMS',
+	            VERSION: '1.3.0',
+	            REQUEST: 'GetMap',
+	            LAYERS: this.layers,
+	            STYLES: this.styles || '',
+	            CRS: this.crs,
+	            WIDTH: '256',
+	            HEIGHT: '256',
+	            FORMAT: this.format,
+	            TRANSPARENT: 'TRUE',
+	            BBOX: `${minX},${minY},${maxX},${maxY}`
+	        });
+	        return url + params.toString();
 	    }
-	    fetchWMSTile(zoom, x, y) {
+	    fetchTile(zoom, x, y) {
 	        return new Promise((resolve, reject) => {
-	            const maxExtent = UnitsUtils.WEB_MERCATOR_MAX_EXTENT;
-	            const tileSize = (2 * maxExtent) / Math.pow(2, zoom);
-	            const minX = -maxExtent + x * tileSize;
-	            const maxX = minX + tileSize;
-	            const maxY = maxExtent - y * tileSize;
-	            const minY = maxY - tileSize;
 	            const image = document.createElement('img');
 	            image.onload = function () {
 	                resolve(image);
@@ -2495,80 +2586,170 @@
 	                reject();
 	            };
 	            image.crossOrigin = 'Anonymous';
-	            let url = this.address;
-	            if (!url.includes('?')) {
-	                url += '?';
-	            }
-	            else if (!url.endsWith('?') && !url.endsWith('&')) {
-	                url += '&';
-	            }
-	            const params = new URLSearchParams({
-	                SERVICE: 'WMS',
-	                VERSION: '1.3.0',
-	                REQUEST: 'GetMap',
-	                LAYERS: this.layers,
-	                STYLES: this.styles,
-	                CRS: this.crs,
-	                WIDTH: '256',
-	                HEIGHT: '256',
-	                FORMAT: this.format,
-	                TRANSPARENT: 'TRUE',
-	                BBOX: `${minX},${minY},${maxX},${maxY}`
-	            });
-	            image.src = url + params.toString();
+	            image.src = this.getTileUrl(zoom, x, y);
 	        });
 	    }
-	    fetchWCSTile(zoom, x, y) {
-	        return __awaiter(this, void 0, void 0, function* () {
-	            let url = this.address;
-	            if (!url.includes('?')) {
-	                url += '?';
+	}
+	class EmodnetTileProvider extends EmodnetProvider {
+	    constructor(address = 'https://tiles.emodnet-bathymetry.eu/2020/baselayer/web_mercator/{z}/{x}/{y}.png', layers = 'emodnet:mean', styles = '', format = 'image/png') {
+	        super(address, layers, format, styles);
+	    }
+	}
+	class EmodnetWCSProvider extends EmodnetProvider {
+	    constructor(address = 'https://ows.emodnet-bathymetry.eu/ows', coverage = 'emodnet:mean', heightMultiplier = 10.0, useBilinear = false) {
+	        super(address, coverage, 'GeoTIFF');
+	        this.heightMultiplier = heightMultiplier;
+	        this.useBilinear = useBilinear;
+	    }
+	    getSnappedBbox(zoom, x, y) {
+	        const n = Math.pow(2, zoom);
+	        const minLon = (x / n) * 360.0 - 180.0;
+	        const maxLon = ((x + 1) / n) * 360.0 - 180.0;
+	        const maxLatRad = Math.atan(Math.sinh(Math.PI * (1.0 - (2.0 * y) / n)));
+	        const maxLat = 180.0 * (maxLatRad / Math.PI);
+	        const minLatRad = Math.atan(Math.sinh(Math.PI * (1.0 - (2.0 * (y + 1)) / n)));
+	        const minLat = 180.0 * (minLatRad / Math.PI);
+	        const dtmRes = EmodnetWCSProvider.DTM_RESOLUTION;
+	        const sMinLon = Math.floor((minLon - dtmRes) / dtmRes) * dtmRes;
+	        const sMaxLon = Math.ceil((maxLon + dtmRes) / dtmRes) * dtmRes;
+	        const sMinLat = Math.floor((minLat - dtmRes) / dtmRes) * dtmRes;
+	        const sMaxLat = Math.ceil((maxLat + dtmRes) / dtmRes) * dtmRes;
+	        const width = Math.round((sMaxLon - sMinLon) / dtmRes);
+	        const height = Math.round((sMaxLat - sMinLat) / dtmRes);
+	        return { sMinLon, sMaxLon, sMinLat, sMaxLat, width, height };
+	    }
+	    getTileUrl(zoom, x, y) {
+	        let url = this.address;
+	        if (url.includes('{z}') || url.includes('{x}') || url.includes('{y}')) {
+	            url = 'https://ows.emodnet-bathymetry.eu/ows';
+	        }
+	        if (!url.includes('?')) {
+	            url += '?';
+	        }
+	        else if (!url.endsWith('?') && !url.endsWith('&')) {
+	            url += '&';
+	        }
+	        const sb = this.getSnappedBbox(zoom, x, y);
+	        const params = new URLSearchParams({
+	            SERVICE: 'WCS',
+	            VERSION: '1.0.0',
+	            REQUEST: 'GetCoverage',
+	            COVERAGE: this.layers,
+	            CRS: 'EPSG:4326',
+	            BBOX: `${sb.sMinLon},${sb.sMinLat},${sb.sMaxLon},${sb.sMaxLat}`,
+	            WIDTH: sb.width.toString(),
+	            HEIGHT: sb.height.toString(),
+	            FORMAT: 'GeoTIFF'
+	        });
+	        return url + params.toString();
+	    }
+	    reprojectEPSG4326To3857(srcArray, srcWidth, srcHeight, zoom, x, y) {
+	        const dstWidth = 256;
+	        const dstHeight = 256;
+	        const dstArray = new Float32Array(dstWidth * dstHeight);
+	        const maxExtent = UnitsUtils.WEB_MERCATOR_MAX_EXTENT;
+	        const tileSize = (2 * maxExtent) / Math.pow(2, zoom);
+	        const minX = -maxExtent + x * tileSize;
+	        const maxX = minX + tileSize;
+	        const maxY = maxExtent - y * tileSize;
+	        const minY = maxY - tileSize;
+	        const sb = this.getSnappedBbox(zoom, x, y);
+	        const sLonSpan = sb.sMaxLon - sb.sMinLon;
+	        const sLatSpan = sb.sMaxLat - sb.sMinLat;
+	        for (let r = 0; r < dstHeight; r++) {
+	            const my = maxY - (r / (dstHeight - 1)) * (maxY - minY);
+	            const latRad = Math.atan(Math.sinh((my / maxExtent) * Math.PI));
+	            const lat = (latRad * 180.0) / Math.PI;
+	            const v = sLatSpan !== 0 ? ((sb.sMaxLat - lat) / sLatSpan) * srcHeight - 0.5 : 0;
+	            for (let c = 0; c < dstWidth; c++) {
+	                const mx = minX + (c / (dstWidth - 1)) * (maxX - minX);
+	                const lon = (mx / maxExtent) * 180.0;
+	                const u = sLonSpan !== 0 ? ((lon - sb.sMinLon) / sLonSpan) * srcWidth - 0.5 : 0;
+	                let sample;
+	                if (this.useBilinear) {
+	                    const u0 = Math.floor(u);
+	                    const u1 = u0 + 1;
+	                    const v0 = Math.floor(v);
+	                    const v1 = v0 + 1;
+	                    const fu = u - u0;
+	                    const fv = v - v0;
+	                    const cu0 = Math.max(0, Math.min(srcWidth - 1, u0));
+	                    const cu1 = Math.max(0, Math.min(srcWidth - 1, u1));
+	                    const cv0 = Math.max(0, Math.min(srcHeight - 1, v0));
+	                    const cv1 = Math.max(0, Math.min(srcHeight - 1, v1));
+	                    const val00 = srcArray[cv0 * srcWidth + cu0];
+	                    const val10 = srcArray[cv0 * srcWidth + cu1];
+	                    const val01 = srcArray[cv1 * srcWidth + cu0];
+	                    const val11 = srcArray[cv1 * srcWidth + cu1];
+	                    const isValid = (val) => !isNaN(val) && val > -100000 && val < 100000;
+	                    if (isValid(val00) && isValid(val10) && isValid(val01) && isValid(val11)) {
+	                        sample = (1 - fu) * (1 - fv) * val00 + fu * (1 - fv) * val10 + (1 - fu) * fv * val01 + fu * fv * val11;
+	                    }
+	                    else {
+	                        const nearestU = Math.max(0, Math.min(srcWidth - 1, Math.round(u)));
+	                        const nearestV = Math.max(0, Math.min(srcHeight - 1, Math.round(v)));
+	                        sample = srcArray[nearestV * srcWidth + nearestU];
+	                    }
+	                }
+	                else {
+	                    const nearestU = Math.max(0, Math.min(srcWidth - 1, Math.round(u)));
+	                    const nearestV = Math.max(0, Math.min(srcHeight - 1, Math.round(v)));
+	                    sample = srcArray[nearestV * srcWidth + nearestU];
+	                }
+	                dstArray[r * dstWidth + c] = sample;
 	            }
-	            else if (!url.endsWith('?') && !url.endsWith('&')) {
-	                url += '&';
+	        }
+	        if (zoom === 19 && x === 283370 && y === 189772) {
+	            const expectedMin = -18.6171875;
+	            const expectedMax = -15.390625;
+	            const outOfBounds = [];
+	            let dstMin = Infinity;
+	            let dstMax = -Infinity;
+	            for (let r = 0; r < dstHeight; r++) {
+	                for (let c = 0; c < dstWidth; c++) {
+	                    const val = dstArray[r * dstWidth + c];
+	                    if (val < dstMin)
+	                        dstMin = val;
+	                    if (val > dstMax)
+	                        dstMax = val;
+	                    if (val < expectedMin || val > expectedMax) {
+	                        outOfBounds.push({ r, c, val });
+	                    }
+	                }
 	            }
-	            let params;
-	            if (zoom >= 7) {
-	                const maxExtent = UnitsUtils.WEB_MERCATOR_MAX_EXTENT;
-	                const tileSize = (2 * maxExtent) / Math.pow(2, zoom);
-	                const minX = -maxExtent + x * tileSize;
-	                const maxX = minX + tileSize;
-	                const maxY = maxExtent - y * tileSize;
-	                const minY = maxY - tileSize;
-	                params = new URLSearchParams({
-	                    SERVICE: 'WCS',
-	                    VERSION: '1.0.0',
-	                    REQUEST: 'GetCoverage',
-	                    COVERAGE: this.layers,
-	                    CRS: 'EPSG:3857',
-	                    BBOX: `${minX},${minY},${maxX},${maxY}`,
-	                    WIDTH: '256',
-	                    HEIGHT: '256',
-	                    FORMAT: 'GeoTIFF'
+	            if (outOfBounds.length > 0) {
+	                let srcMin = Infinity;
+	                let srcMax = -Infinity;
+	                for (let i = 0; i < srcArray.length; i++) {
+	                    const sv = srcArray[i];
+	                    if (!isNaN(sv)) {
+	                        if (sv < srcMin)
+	                            srcMin = sv;
+	                        if (sv > srcMax)
+	                            srcMax = sv;
+	                    }
+	                }
+	                console.warn(`[EmodnetWCSProvider Debug] Tile (z:${zoom}, x:${x}, y:${y}) returned unexpected height values outside expected range [${expectedMin}, ${expectedMax}]:`, {
+	                    outOfBoundsCount: outOfBounds.length,
+	                    dstMin,
+	                    dstMax,
+	                    srcMin,
+	                    srcMax,
+	                    sampleOutOfBounds: outOfBounds.slice(0, 10),
+	                    snappedBbox: sb
 	                });
 	            }
 	            else {
-	                const n = Math.pow(2, zoom);
-	                const minLon = (x / n) * 360.0 - 180.0;
-	                const maxLon = ((x + 1) / n) * 360.0 - 180.0;
-	                const maxLatRad = Math.atan(Math.sinh(Math.PI * (1.0 - 2.0 * y / n)));
-	                const maxLat = 180.0 * (maxLatRad / Math.PI);
-	                const minLatRad = Math.atan(Math.sinh(Math.PI * (1.0 - 2.0 * (y + 1) / n)));
-	                const minLat = 180.0 * (minLatRad / Math.PI);
-	                params = new URLSearchParams({
-	                    SERVICE: 'WCS',
-	                    VERSION: '1.0.0',
-	                    REQUEST: 'GetCoverage',
-	                    COVERAGE: this.layers,
-	                    CRS: 'EPSG:4326',
-	                    BBOX: `${minLon},${minLat},${maxLon},${maxLat}`,
-	                    WIDTH: '256',
-	                    HEIGHT: '256',
-	                    FORMAT: 'GeoTIFF'
-	                });
+	                console.log(`[EmodnetWCSProvider Debug] Tile (z:${zoom}, x:${x}, y:${y}) all depth values within expected range [${expectedMin}, ${expectedMax}]. (Min: ${dstMin}, Max: ${dstMax})`);
 	            }
+	        }
+	        return dstArray;
+	    }
+	    fetchTile(zoom, x, y) {
+	        return __awaiter(this, void 0, void 0, function* () {
+	            const tileUrl = this.getTileUrl(zoom, x, y);
 	            try {
-	                const response = yield fetch(url + params.toString());
+	                const response = yield fetch(tileUrl);
 	                if (!response.ok) {
 	                    throw new Error(`WCS fetch failed with status ${response.status}`);
 	                }
@@ -2577,8 +2758,8 @@
 	                if (!parsed) {
 	                    throw new Error('Failed to parse GeoTIFF mathematical depth data');
 	                }
-	                const cleanedArray = this.cleanAndFillNoData(parsed.floatArray, parsed.width, parsed.height);
-	                return this.encodeHeightToTerrainRGB(cleanedArray, parsed.width, parsed.height);
+	                const reprojected = this.reprojectEPSG4326To3857(parsed.floatArray, parsed.width, parsed.height, zoom, x, y);
+	                return this.encodeHeightToTerrainRGB(reprojected, 256, 256);
 	            }
 	            catch (err) {
 	                const canvas = document.createElement('canvas');
@@ -2591,117 +2772,36 @@
 	    parseGeoTIFFFloat32(arrayBuffer) {
 	        return GeoTiffDecoder.decodeFloat32(arrayBuffer);
 	    }
-	    cleanAndFillNoData(floatArray, width, height) {
-	        const cleaned = new Float32Array(floatArray.length);
-	        const validMask = new Uint8Array(floatArray.length);
-	        let firstValidValue = 0;
-	        let hasValid = false;
-	        for (let i = 0; i < floatArray.length; i++) {
-	            const v = floatArray[i];
-	            if (!isNaN(v) && v > -10000 && v < 10000 && Math.abs(v - -9999) > 0.1 && Math.abs(v - 9999) > 0.1) {
-	                cleaned[i] = v;
-	                validMask[i] = 1;
-	                if (!hasValid) {
-	                    firstValidValue = v;
-	                    hasValid = true;
-	                }
-	            }
-	        }
-	        if (!hasValid) {
-	            cleaned.fill(0);
-	            return cleaned;
-	        }
-	        let lastVal = firstValidValue;
-	        for (let i = 0; i < floatArray.length; i++) {
-	            if (validMask[i]) {
-	                lastVal = cleaned[i];
-	            }
-	            else {
-	                cleaned[i] = lastVal;
-	            }
-	        }
-	        for (let pass = 0; pass < 3; pass++) {
-	            for (let r = 0; r < height; r++) {
-	                for (let c = 0; c < width; c++) {
-	                    const idx = r * width + c;
-	                    if (!validMask[idx]) {
-	                        let sum = 0;
-	                        let count = 0;
-	                        if (r > 0) {
-	                            sum += cleaned[(r - 1) * width + c];
-	                            count++;
-	                        }
-	                        if (r < height - 1) {
-	                            sum += cleaned[(r + 1) * width + c];
-	                            count++;
-	                        }
-	                        if (c > 0) {
-	                            sum += cleaned[r * width + (c - 1)];
-	                            count++;
-	                        }
-	                        if (c < width - 1) {
-	                            sum += cleaned[r * width + (c + 1)];
-	                            count++;
-	                        }
-	                        if (count > 0) {
-	                            cleaned[idx] = sum / count;
-	                        }
-	                    }
-	                }
-	            }
-	        }
-	        return cleaned;
-	    }
-	    encodeHeightToTerrainRGB(floatArray, srcWidth, srcHeight, targetWidth = 256, targetHeight = 256) {
+	    encodeHeightToTerrainRGB(floatArray, width, height) {
 	        const canvas = document.createElement('canvas');
-	        canvas.width = targetWidth;
-	        canvas.height = targetHeight;
+	        canvas.width = width;
+	        canvas.height = height;
 	        const ctx = canvas.getContext('2d');
 	        if (!ctx) {
 	            return canvas;
 	        }
-	        const imageData = ctx.createImageData(targetWidth, targetHeight);
+	        ctx.imageSmoothingEnabled = false;
+	        const imageData = ctx.createImageData(width, height);
 	        const data = imageData.data;
-	        const sample = (c, r) => {
-	            const safeC = Math.max(0, Math.min(srcWidth - 1, c));
-	            const safeR = Math.max(0, Math.min(srcHeight - 1, r));
-	            return floatArray[safeR * srcWidth + safeC];
-	        };
-	        for (let y = 0; y < targetHeight; y++) {
-	            const v = (targetHeight > 1) ? (y / (targetHeight - 1)) * (srcHeight - 1) : 0;
-	            const y0 = Math.floor(v);
-	            const y1 = Math.min(srcHeight - 1, y0 + 1);
-	            const ty = v - y0;
-	            for (let x = 0; x < targetWidth; x++) {
-	                const u = (targetWidth > 1) ? (x / (targetWidth - 1)) * (srcWidth - 1) : 0;
-	                const x0 = Math.floor(u);
-	                const x1 = Math.min(srcWidth - 1, x0 + 1);
-	                const tx = u - x0;
-	                const v00 = sample(x0, y0);
-	                const v10 = sample(x1, y0);
-	                const v01 = sample(x0, y1);
-	                const v11 = sample(x1, y1);
-	                const rawDepth = (1 - tx) * (1 - ty) * v00 +
-	                    tx * (1 - ty) * v10 +
-	                    (1 - tx) * ty * v01 +
-	                    tx * ty * v11;
-	                const depthMeters = rawDepth * this.heightMultiplier;
-	                let val = Math.round((depthMeters + 10000) * 10);
-	                val = Math.max(0, Math.min(16777215, val));
-	                const r = Math.floor(val / 65536) & 0xff;
-	                const g = Math.floor(val / 256) & 0xff;
-	                const b = val & 0xff;
-	                const pxIdx = (y * targetWidth + x) * 4;
-	                data[pxIdx] = r;
-	                data[pxIdx + 1] = g;
-	                data[pxIdx + 2] = b;
-	                data[pxIdx + 3] = 255;
-	            }
+	        for (let i = 0; i < floatArray.length; i++) {
+	            const rawDepth = floatArray[i];
+	            const depthMeters = rawDepth * this.heightMultiplier;
+	            let val = Math.round((depthMeters + 10000) * 10);
+	            val = Math.max(0, Math.min(16777215, val));
+	            const r = Math.floor(val / 65536) & 0xff;
+	            const g = Math.floor(val / 256) & 0xff;
+	            const b = val & 0xff;
+	            const pxIdx = i * 4;
+	            data[pxIdx] = r;
+	            data[pxIdx + 1] = g;
+	            data[pxIdx + 2] = b;
+	            data[pxIdx + 3] = 255;
 	        }
 	        ctx.putImageData(imageData, 0, 0);
 	        return canvas;
 	    }
 	}
+	EmodnetWCSProvider.DTM_RESOLUTION = 1.0 / 960.0;
 
 	class GeolocationUtils {
 	    static get() {
@@ -2799,6 +2899,8 @@
 	exports.CanvasUtils = CanvasUtils;
 	exports.DebugProvider = DebugProvider;
 	exports.EmodnetProvider = EmodnetProvider;
+	exports.EmodnetTileProvider = EmodnetTileProvider;
+	exports.EmodnetWCSProvider = EmodnetWCSProvider;
 	exports.Geolocation = Geolocation;
 	exports.GeolocationUtils = GeolocationUtils;
 	exports.GoogleMapsProvider = GoogleMapsProvider;

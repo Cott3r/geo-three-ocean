@@ -18,5 +18,5 @@ export declare class GeoTiffDecoder {
     private static fixedDistTable;
     private static buildFixedLitTable;
     private static buildFixedDistTable;
-    private static applyHorizontalPredictor;
+    private static applyPredictor;
 }

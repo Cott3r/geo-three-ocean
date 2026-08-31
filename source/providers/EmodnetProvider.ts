@@ -1,6 +1,7 @@
 import { MapProvider } from './MapProvider';
 import { UnitsUtils } from '../utils/UnitsUtils';
 import { GeoTiffDecoder } from '../utils/GeoTiffDecoder';
+import { XHRUtils } from '../utils/XHRUtils';
 
 /**
  * Base EMODnet Bathymetry tile provider.
@@ -89,17 +90,7 @@ export class EmodnetProvider extends MapProvider {
 	}
 
 	public fetchTile(zoom: number, x: number, y: number): Promise<HTMLImageElement> {
-		return new Promise<HTMLImageElement>((resolve, reject) => {
-			const image = document.createElement('img');
-			image.onload = function () {
-				resolve(image);
-			};
-			image.onerror = function () {
-				reject();
-			};
-			image.crossOrigin = 'Anonymous';
-			image.src = this.getTileUrl(zoom, x, y);
-		});
+		return XHRUtils.fetchImage(this.getTileUrl(zoom, x, y));
 	}
 }
 
@@ -344,12 +335,7 @@ export class EmodnetWCSProvider extends EmodnetProvider {
 		const tileUrl = this.getTileUrl(zoom, x, y);
 
 		try {
-			const response = await fetch(tileUrl);
-			if (!response.ok) {
-				throw new Error(`WCS fetch failed with status ${response.status}`);
-			}
-
-			const arrayBuffer = await response.arrayBuffer();
+			const arrayBuffer = await XHRUtils.getRaw(tileUrl);
 			const parsed = this.parseGeoTIFFFloat32(arrayBuffer);
 			if (!parsed) {
 				throw new Error('Failed to parse GeoTIFF mathematical depth data');

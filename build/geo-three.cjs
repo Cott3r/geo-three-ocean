@@ -1626,32 +1626,127 @@ class LODFrustumOrthographic extends LODFrustum {
 }
 
 class XHRUtils {
+    static get activeRequests() {
+        return XHRUtils.activeRequestsCount;
+    }
+    static get pendingRequests() {
+        return XHRUtils.queue.length;
+    }
+    static resetQueue() {
+        XHRUtils.activeRequestsCount = 0;
+        XHRUtils.queue = [];
+    }
+    static enqueue(task) {
+        return __awaiter(this, void 0, void 0, function* () {
+            return new Promise((resolve, reject) => {
+                const runTask = () => {
+                    XHRUtils.activeRequestsCount++;
+                    task()
+                        .then(resolve)
+                        .catch(reject)
+                        .finally(() => {
+                        XHRUtils.activeRequestsCount--;
+                        if (XHRUtils.queue.length > 0) {
+                            const next = XHRUtils.queue.shift();
+                            if (next) {
+                                next();
+                            }
+                        }
+                    });
+                };
+                if (XHRUtils.activeRequestsCount < XHRUtils.maxConcurrentRequests) {
+                    runTask();
+                }
+                else {
+                    XHRUtils.queue.push(runTask);
+                }
+            });
+        });
+    }
+    static fetchWithRetry(url, options, retries = XHRUtils.maxRetries, delayMs = XHRUtils.initialRetryDelayMs) {
+        return __awaiter(this, void 0, void 0, function* () {
+            return XHRUtils.enqueue(() => __awaiter(this, void 0, void 0, function* () {
+                let attempt = 0;
+                let currentDelay = delayMs;
+                while (true) {
+                    try {
+                        const response = yield fetch(url, options);
+                        if (!response.ok &&
+                            (response.status === 502 || response.status === 504 || response.status === 503 || response.status === 429) &&
+                            attempt < retries) {
+                            attempt++;
+                            const jitter = Math.random() * 50;
+                            const totalDelay = Math.round(currentDelay + jitter);
+                            console.warn(`[XHRUtils] Transient HTTP ${response.status} for ${url}. Retrying attempt ${attempt}/${retries} in ${totalDelay}ms...`);
+                            yield new Promise((res) => setTimeout(res, totalDelay));
+                            currentDelay *= XHRUtils.backoffFactor;
+                            continue;
+                        }
+                        return response;
+                    }
+                    catch (error) {
+                        if (attempt < retries) {
+                            attempt++;
+                            const jitter = Math.random() * 50;
+                            const totalDelay = Math.round(currentDelay + jitter);
+                            console.warn(`[XHRUtils] Network error fetching ${url}. Retrying attempt ${attempt}/${retries} in ${totalDelay}ms...`);
+                            yield new Promise((res) => setTimeout(res, totalDelay));
+                            currentDelay *= XHRUtils.backoffFactor;
+                            continue;
+                        }
+                        throw error;
+                    }
+                }
+            }));
+        });
+    }
     static get(url) {
         return __awaiter(this, void 0, void 0, function* () {
-            return new Promise(function (resolve, reject) {
-                const xhr = new XMLHttpRequest();
-                xhr.overrideMimeType('text/plain');
-                xhr.open('GET', url, true);
-                xhr.onload = function () {
-                    resolve(xhr.response);
-                };
-                xhr.onerror = reject;
-                xhr.send(null);
-            });
+            const response = yield XHRUtils.fetchWithRetry(url);
+            if (!response.ok) {
+                throw new Error(`HTTP request failed with status ${response.status}`);
+            }
+            return yield response.text();
         });
     }
     static getRaw(url) {
         return __awaiter(this, void 0, void 0, function* () {
-            return new Promise(function (resolve, reject) {
-                var xhr = new XMLHttpRequest();
-                xhr.responseType = 'arraybuffer';
-                xhr.open('GET', url, true);
-                xhr.onload = function () {
-                    resolve(xhr.response);
-                };
-                xhr.onerror = reject;
-                xhr.send(null);
-            });
+            const response = yield XHRUtils.fetchWithRetry(url);
+            if (!response.ok) {
+                throw new Error(`HTTP request failed with status ${response.status}`);
+            }
+            return yield response.arrayBuffer();
+        });
+    }
+    static fetchImage(url) {
+        return __awaiter(this, void 0, void 0, function* () {
+            return XHRUtils.enqueue(() => __awaiter(this, void 0, void 0, function* () {
+                let attempt = 0;
+                let currentDelay = XHRUtils.initialRetryDelayMs;
+                while (true) {
+                    try {
+                        const img = yield new Promise((resolve, reject) => {
+                            const image = document.createElement('img');
+                            image.onload = () => resolve(image);
+                            image.onerror = (err) => reject(err);
+                            image.crossOrigin = 'Anonymous';
+                            image.src = url;
+                        });
+                        return img;
+                    }
+                    catch (err) {
+                        if (attempt < XHRUtils.maxRetries) {
+                            attempt++;
+                            const jitter = Math.random() * 50;
+                            const totalDelay = Math.round(currentDelay + jitter);
+                            yield new Promise((res) => setTimeout(res, totalDelay));
+                            currentDelay *= XHRUtils.backoffFactor;
+                            continue;
+                        }
+                        throw err;
+                    }
+                }
+            }));
         });
     }
     static request(url, type, header, body, onLoad, onError, onProgress) {
@@ -1686,6 +1781,12 @@ class XHRUtils {
         return xhr;
     }
 }
+XHRUtils.maxConcurrentRequests = 5;
+XHRUtils.maxRetries = 3;
+XHRUtils.initialRetryDelayMs = 200;
+XHRUtils.backoffFactor = 2.0;
+XHRUtils.activeRequestsCount = 0;
+XHRUtils.queue = [];
 
 class BingMapsProvider extends MapProvider {
     constructor(apiKey = '', type = BingMapsProvider.AERIAL) {
@@ -2575,17 +2676,7 @@ class EmodnetProvider extends MapProvider {
         return url + params.toString();
     }
     fetchTile(zoom, x, y) {
-        return new Promise((resolve, reject) => {
-            const image = document.createElement('img');
-            image.onload = function () {
-                resolve(image);
-            };
-            image.onerror = function () {
-                reject();
-            };
-            image.crossOrigin = 'Anonymous';
-            image.src = this.getTileUrl(zoom, x, y);
-        });
+        return XHRUtils.fetchImage(this.getTileUrl(zoom, x, y));
     }
 }
 class EmodnetTileProvider extends EmodnetProvider {
@@ -2747,11 +2838,7 @@ class EmodnetWCSProvider extends EmodnetProvider {
         return __awaiter(this, void 0, void 0, function* () {
             const tileUrl = this.getTileUrl(zoom, x, y);
             try {
-                const response = yield fetch(tileUrl);
-                if (!response.ok) {
-                    throw new Error(`WCS fetch failed with status ${response.status}`);
-                }
-                const arrayBuffer = yield response.arrayBuffer();
+                const arrayBuffer = yield XHRUtils.getRaw(tileUrl);
                 const parsed = this.parseGeoTIFFFloat32(arrayBuffer);
                 if (!parsed) {
                     throw new Error('Failed to parse GeoTIFF mathematical depth data');

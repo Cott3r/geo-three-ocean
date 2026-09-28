@@ -30,4 +30,5 @@ export declare class MapMartiniHeightNode extends MapHeightNode {
     };
     processHeight(image: HTMLImageElement): Promise<void>;
     loadHeightGeometry(): Promise<void>;
+    dispose(): void;
 }

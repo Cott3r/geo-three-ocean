@@ -1,4 +1,4 @@
-import {LinearFilter, RGBAFormat, Texture} from 'three';
+import {LinearFilter, RGBAFormat, Texture, SRGBColorSpace} from 'three';
 import {CanvasUtils} from './CanvasUtils';
 
 /**
@@ -14,8 +14,9 @@ export class TextureUtils
       * @param color - Style to apply to the texture surface.
       * @param width - Width of the canvas in pixels.
       * @param height - Height of the canvas in pixels.
+      * @param colorSpace - Texture color space, defaults to SRGBColorSpace.
       */
-	public static createFillTexture(color: (string | CanvasGradient | CanvasPattern) = '#000000', width: number = 1, height: number = 1): Texture
+	public static createFillTexture(color: (string | CanvasGradient | CanvasPattern) = '#000000', width: number = 1, height: number = 1, colorSpace: string = SRGBColorSpace): Texture
 	{
 		const canvas = CanvasUtils.createOffscreenCanvas(width, height);
 
@@ -24,6 +25,7 @@ export class TextureUtils
 		context.fillRect(0, 0, width, height);
 
 		const texture = new Texture(canvas as any);
+		texture.colorSpace = colorSpace;
 		texture.format = RGBAFormat;
 		texture.magFilter = LinearFilter;
 		texture.minFilter = LinearFilter;

@@ -1,4 +1,4 @@
-import {Matrix4, BufferGeometry, Quaternion, Vector3, Raycaster, Intersection, ShaderMaterial, TextureLoader, Texture, Vector4, REVISION} from 'three';
+import {Matrix4, BufferGeometry, Quaternion, Vector3, Raycaster, Intersection, ShaderMaterial, Texture, Vector4, SRGBColorSpace, LinearFilter, RGBAFormat} from 'three';
 import {MapNode, QuadTreePosition} from './MapNode';
 import {MapSphereNodeGeometry} from '../geometries/MapSphereNodeGeometry';
 import {UnitsUtils} from '../utils/UnitsUtils';
@@ -17,7 +17,11 @@ export class MapSphereNode extends MapNode
 	 * 
 	 * Applied to the map view on initialization.
 	 */
-	public static baseGeometry: BufferGeometry = new MapSphereNodeGeometry(UnitsUtils.EARTH_RADIUS, 64, 64, 0, 2 * Math.PI, 0, Math.PI);
+	public static baseGeometry: BufferGeometry = (() => {
+		const geom = new MapSphereNodeGeometry(UnitsUtils.EARTH_RADIUS, 64, 64, 0, 2 * Math.PI, 0, Math.PI);
+		(geom as any).isSharedGeometry = true;
+		return geom;
+	})();
 
 	/**
 	 * Base scale of the node.
@@ -39,21 +43,31 @@ export class MapSphereNode extends MapNode
 
 		// Load shaders
 		const vertexShader = `
+		#include <common>
+		#include <logdepthbuf_pars_vertex>
+
 		varying vec3 vPosition;
 
 		void main() {
 			vPosition = position;
 			gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+
+			#include <logdepthbuf_vertex>
 		}
 		`;
 
 		const fragmentShader = `
+		#include <common>
+		#include <logdepthbuf_pars_fragment>
+
 		#define PI 3.1415926538
 		varying vec3 vPosition;
 		uniform sampler2D uTexture;
 		uniform vec4 webMercatorBounds;
 
 		void main() {
+			#include <logdepthbuf_fragment>
+
 			// this could also be a constant, but for some reason using a constant causes more visible tile gaps at high zoom
 			float radius = length(vPosition);
 
@@ -67,19 +81,16 @@ export class MapSphereNode extends MapNode
 
 			vec4 color = texture2D(uTexture, vec2(x, y));
 			gl_FragColor = color;
-			${
-	parseInt(REVISION) < 152 ? '' : `
-				#include <tonemapping_fragment>
-				#include ${parseInt(REVISION) >= 154 ? '<colorspace_fragment>' : '<encodings_fragment>'}
-				`
-}
+
+			#include <tonemapping_fragment>
+			#include <colorspace_fragment>
 		}
 		`;
 		
 		// Create shader material
 		let vBounds = new Vector4(...bounds);
 		const material = new ShaderMaterial({
-			uniforms: {uTexture: {value: new Texture()}, webMercatorBounds: {value: vBounds}},
+			uniforms: {uTexture: {value: MapNode.defaultTexture}, webMercatorBounds: {value: vBounds}},
 			vertexShader: vertexShader,
 			fragmentShader: fragmentShader
 		});
@@ -132,14 +143,26 @@ export class MapSphereNode extends MapNode
 	
 	public async applyTexture(image: HTMLImageElement): Promise<void>
 	{		
-		const textureLoader = new TextureLoader();
-		const texture = textureLoader.load(image.src, function() 
+		if (this.disposed) 
 		{
-			if (parseInt(REVISION) >= 152) 
-			{
-				texture.colorSpace = 'srgb';
-			}
-		});
+			return;
+		}
+
+		const texture = new Texture(image);
+		texture.colorSpace = SRGBColorSpace;
+		texture.generateMipmaps = false;
+		texture.format = RGBAFormat;
+		texture.magFilter = LinearFilter;
+		texture.minFilter = LinearFilter;
+		texture.needsUpdate = true;
+
+		// @ts-ignore
+		const oldTexture = this.material.uniforms?.uTexture?.value;
+		if (oldTexture && oldTexture !== MapNode.defaultTexture && typeof oldTexture.dispose === 'function')
+		{
+			oldTexture.dispose();
+		}
+
 		// @ts-ignore
 		this.material.uniforms.uTexture.value = texture;
 		// @ts-ignore
@@ -211,5 +234,28 @@ export class MapSphereNode extends MapNode
 		{
 			super.raycast(raycaster, intersects);
 		}
+	}
+
+	public dispose(): void
+	{
+		if (this.disposed)
+		{
+			return;
+		}
+
+		// @ts-ignore
+		if (this.material && this.material.uniforms?.uTexture?.value)
+		{
+			// @ts-ignore
+			const tex = this.material.uniforms.uTexture.value;
+			if (tex && tex !== MapNode.defaultTexture && typeof tex.dispose === 'function')
+			{
+				tex.dispose();
+				// @ts-ignore
+				this.material.uniforms.uTexture.value = null;
+			}
+		}
+
+		super.dispose();
 	}
 }

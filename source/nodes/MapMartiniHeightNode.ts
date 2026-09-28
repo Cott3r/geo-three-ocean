@@ -1,10 +1,11 @@
-import {BufferGeometry, DoubleSide, Float32BufferAttribute, Material, MeshPhongMaterial, NearestFilter, RGBAFormat, Texture, Uint32BufferAttribute} from 'three';
+import {BufferGeometry, DoubleSide, Float32BufferAttribute, Material, MeshPhongMaterial, NearestFilter, NoColorSpace, RGBAFormat, Texture, Uint32BufferAttribute} from 'three';
 import {MapNodeGeometry} from '../geometries/MapNodeGeometry';
 import {MapView} from '../MapView';
 import {Martini} from './Martini';
 import {MapHeightNode} from './MapHeightNode';
 import {CanvasUtils} from '../utils/CanvasUtils';
 import {QuadTreePosition} from './MapNode';
+import {MapPlaneNode} from './MapPlaneNode';
 
 /** 
  * Represents a height map tile node using the RTIN method from the paper "Right Triangulated Irregular Networks".
@@ -35,7 +36,11 @@ export class MapMartiniHeightNode extends MapHeightNode
 	/**
 	 * Base geometry appied before any custom geometru is used.
 	 */
-	public static geometry = new MapNodeGeometry(1, 1, 1, 1);
+	public static geometry = (() => {
+		const geom = new MapNodeGeometry(1, 1, 1, 1);
+		(geom as any).isSharedGeometry = true;
+		return geom;
+	})();
 
 	/**
 	 * Elevation decoder configuration.
@@ -119,6 +124,11 @@ export class MapMartiniHeightNode extends MapHeightNode
 				uniform bool computeNormals;
 				uniform float zoomlevel;
 				uniform sampler2D heightMap;
+
+				float getElevation(vec2 coord, float defaultValue) {
+					vec4 c = texture2D(heightMap, coord);
+					return ((c.r * 255.0 * 65536.0 + c.g * 255.0 * 256.0 + c.b * 255.0) * 0.1) - 10000.0;
+				}
 				` + shader.vertexShader;
 			
 			shader.fragmentShader =
@@ -305,18 +315,31 @@ export class MapMartiniHeightNode extends MapHeightNode
 
 		const attributes = MapMartiniHeightNode.getMeshAttributes(vertices, terrain, tileSize, [-0.5, -0.5, 0.5, 0.5], this.exageration);
 
+		const oldGeometry = this.geometry;
 		this.geometry = new BufferGeometry();
 		this.geometry.setIndex(new Uint32BufferAttribute(triangles, 1));
 		this.geometry.setAttribute('position', new Float32BufferAttribute( attributes.position.value, attributes.position.size));
 		this.geometry.setAttribute('uv', new Float32BufferAttribute( attributes.uv.value, attributes.uv.size));
 		this.geometry.rotateX(Math.PI);
+		if (oldGeometry && !(oldGeometry as any).isSharedGeometry && oldGeometry !== MapMartiniHeightNode.geometry && oldGeometry !== MapHeightNode.geometry && oldGeometry !== MapPlaneNode.baseGeometry) 
+		{
+			oldGeometry.dispose();
+		}
 
 		var texture = new Texture(image);
+		texture.colorSpace = NoColorSpace;
 		texture.generateMipmaps = false;
 		texture.format = RGBAFormat;
 		texture.magFilter = NearestFilter;
 		texture.minFilter = NearestFilter;
 		texture.needsUpdate = true;
+
+		// @ts-ignore
+		const oldTexture = this.material.userData?.heightMap?.value;
+		if (oldTexture && oldTexture !== MapMartiniHeightNode.emptyTexture && typeof oldTexture.dispose === 'function')
+		{
+			oldTexture.dispose();
+		}
 
 		this.material.userData.heightMap.value = texture;
 		// @ts-ignore
@@ -330,9 +353,9 @@ export class MapMartiniHeightNode extends MapHeightNode
 	 */
 	public async loadHeightGeometry(): Promise<void> 
 	{
-		if (this.mapView.heightProvider === null) 
+		if (!this.mapView || this.mapView.heightProvider === null) 
 		{
-			throw new Error('GeoThree: MapView.heightProvider provider is null.');
+			return;
 		}
 
 		const image = await this.mapView.heightProvider.fetchTile(this.level, this.x, this.y);
@@ -346,5 +369,28 @@ export class MapMartiniHeightNode extends MapHeightNode
 
 		this.heightLoaded = true;
 		this.nodeReady();
+	}
+
+	public dispose(): void
+	{
+		if (this.disposed) 
+		{
+			return;
+		}
+
+		// @ts-ignore
+		if (this.material && this.material.userData?.heightMap?.value)
+		{
+			// @ts-ignore
+			const hm = this.material.userData.heightMap.value;
+			if (hm && hm !== MapMartiniHeightNode.emptyTexture && typeof hm.dispose === 'function')
+			{
+				hm.dispose();
+				// @ts-ignore
+				this.material.userData.heightMap.value = null;
+			}
+		}
+
+		super.dispose();
 	}
 }

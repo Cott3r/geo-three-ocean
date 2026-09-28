@@ -14,4 +14,5 @@ export declare class MapSphereNode extends MapNode {
     updateMatrixWorld(force?: boolean): void;
     createChildNodes(): void;
     raycast(raycaster: Raycaster, intersects: Intersection[]): void;
+    dispose(): void;
 }

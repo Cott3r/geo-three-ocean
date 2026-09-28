@@ -25,4 +25,5 @@ export declare class MapView extends Mesh {
     maxZoom(): number;
     getMetaData(): void;
     raycast(raycaster: Raycaster, intersects: any[]): boolean;
+    dispose(): void;
 }

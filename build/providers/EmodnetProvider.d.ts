@@ -7,7 +7,7 @@ export declare class EmodnetProvider extends MapProvider {
     styles: string;
     constructor(address?: string, layers?: string, format?: string, styles?: string);
     getTileUrl(zoom: number, x: number, y: number): string;
-    fetchTile(zoom: number, x: number, y: number): Promise<HTMLImageElement>;
+    fetchTile(zoom: number, x: number, y: number): Promise<HTMLImageElement | HTMLCanvasElement>;
 }
 export declare class EmodnetTileProvider extends EmodnetProvider {
     constructor(address?: string, layers?: string, styles?: string, format?: string);

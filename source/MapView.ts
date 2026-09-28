@@ -284,4 +284,30 @@ export class MapView extends Mesh
 	{
 		return false;
 	}
+
+	/**
+	 * Dispose all map resources (nodes, materials, textures, geometries).
+	 */
+	public dispose(): void 
+	{
+		if (this.root && typeof (this.root as any).dispose === 'function') 
+		{
+			(this.root as any).dispose();
+			this.root = null;
+		}
+
+		this.traverse((child: any) => 
+		{
+			if (child !== this && typeof child.dispose === 'function') 
+			{
+				try 
+				{
+					child.dispose();
+				} 
+				catch (e) {}
+			}
+		});
+
+		this.clear();
+	}
 }

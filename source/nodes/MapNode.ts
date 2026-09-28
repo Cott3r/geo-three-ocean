@@ -1,4 +1,4 @@
-import {LinearFilter, Material, Mesh, Texture, Vector3, BufferGeometry, Object3D, RGBAFormat, REVISION} from 'three';
+import {LinearFilter, Material, Mesh, Texture, Vector3, BufferGeometry, Object3D, RGBAFormat, SRGBColorSpace} from 'three';
 import {MapView} from '../MapView';
 import {TextureUtils} from '../utils/TextureUtils';
 
@@ -53,7 +53,7 @@ export abstract class MapNode extends Mesh
 	/**
 	 * Default texture used when texture fails to load.
 	 */
-	public static defaultTexture = TextureUtils.createFillTexture();
+	public static defaultTexture = TextureUtils.createFillTexture('#000000', 1, 1, SRGBColorSpace);
 
 	/**
 	 * The map view object where the node is placed.
@@ -245,6 +245,11 @@ export abstract class MapNode extends Mesh
 	 */
 	public async loadData(): Promise<void>
 	{
+		if (!this.mapView || !this.mapView.provider)
+		{
+			return;
+		}
+
 		if (this.level < this.mapView.provider.minZoom || this.level > this.mapView.provider.maxZoom)
 		{
 			console.warn('Geo-Three: Loading tile outside of provider range.', this);
@@ -286,10 +291,7 @@ export abstract class MapNode extends Mesh
 		}
 	
 		const texture = new Texture(image);
-		if (parseInt(REVISION) >= 152) 
-		{
-			texture.colorSpace = 'srgb';
-		}
+		texture.colorSpace = SRGBColorSpace;
 		texture.generateMipmaps = false;
 		texture.format = RGBAFormat;
 		texture.magFilter = LinearFilter;
@@ -347,32 +349,105 @@ export abstract class MapNode extends Mesh
 	/**
 	 * Dispose the map node and its resources.
 	 * 
-	 * Should cancel all pending processing for the node.
+	 * Recursively disposes children and deallocates geometries, materials, and textures.
 	 */
 	public dispose(): void 
 	{
+		if (this.disposed) 
+		{
+			return;
+		}
+
 		this.disposed = true;
 
-		const self = this as Mesh;
-
-		try 
+		// 1. Recursively dispose children
+		for (let i = 0; i < this.children.length; i++) 
 		{
-			const material = self.material as Material;
-			material.dispose();
-
-			// @ts-ignore
-			if (material.map && material.map !== MapNode.defaultTexture)
+			const child = this.children[i];
+			if (child instanceof MapNode) 
 			{
-				// @ts-ignore
-				material.map.dispose();
+				child.dispose();
 			}
 		}
-		catch (e) {}
-		
-		try 
+		this.children = [];
+
+		// 2. Dispose cached children if any
+		if (this.childrenCache) 
 		{
-			self.geometry.dispose();
+			for (let i = 0; i < this.childrenCache.length; i++) 
+			{
+				const child = this.childrenCache[i];
+				if (child instanceof MapNode) 
+				{
+					child.dispose();
+				}
+			}
+			this.childrenCache = null;
 		}
-		catch (e) {}	
+
+		// 3. Dispose materials and textures
+		const self = this as Mesh;
+		if (self.material) 
+		{
+			const materials = Array.isArray(self.material) ? self.material : [self.material];
+			for (let i = 0; i < materials.length; i++) 
+			{
+				const mat = materials[i] as any;
+				if (!mat) continue;
+
+				if (mat.map && mat.map !== MapNode.defaultTexture && typeof mat.map.dispose === 'function') 
+				{
+					mat.map.dispose();
+					mat.map = null;
+				}
+
+				if (mat.uniforms) 
+				{
+					for (const key in mat.uniforms) 
+					{
+						const u = mat.uniforms[key];
+						if (u && u.value && u.value !== MapNode.defaultTexture && typeof u.value.dispose === 'function') 
+						{
+							u.value.dispose();
+							u.value = null;
+						}
+					}
+				}
+
+				if (mat.userData) 
+				{
+					if (mat.userData.heightMap && mat.userData.heightMap.value && typeof mat.userData.heightMap.value.dispose === 'function') 
+					{
+						mat.userData.heightMap.value.dispose();
+						mat.userData.heightMap.value = null;
+					}
+				}
+
+				try 
+				{
+					mat.dispose();
+				} 
+				catch (e) {}
+			}
+		}
+
+		// 4. Dispose geometry if instance-specific (do NOT dispose shared static geometries)
+		if (self.geometry) 
+		{
+			const isShared = 
+				(self.geometry as any).isSharedGeometry === true ||
+				self.geometry === (this.constructor as any)?.geometry ||
+				self.geometry === (this.constructor as any)?.baseGeometry ||
+				self.geometry === MapNode.baseGeometry;
+
+			if (!isShared) 
+			{
+				try 
+				{
+					self.geometry.dispose();
+				} 
+				catch (e) {}
+			}
+		}
 	}
 }

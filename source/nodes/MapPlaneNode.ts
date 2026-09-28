@@ -19,7 +19,11 @@ export class MapPlaneNode extends MapNode
 	/**
 	 * Map node plane geometry.
 	 */
-	public static geometry: BufferGeometry = new MapNodeGeometry(1, 1, 1, 1, false);
+	public static geometry: BufferGeometry = (() => {
+		const geom = new MapNodeGeometry(1, 1, 1, 1, false);
+		(geom as any).isSharedGeometry = true;
+		return geom;
+	})();
 
 	public static baseGeometry: BufferGeometry = MapPlaneNode.geometry;
 

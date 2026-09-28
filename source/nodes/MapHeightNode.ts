@@ -43,7 +43,11 @@ export class MapHeightNode extends MapNode {
 	/**
 	 * Map node plane geometry.
 	 */
-	public static geometry: BufferGeometry = new MapNodeGeometry(1, 1, 1, 1);
+	public static geometry: BufferGeometry = (() => {
+		const geom = new MapNodeGeometry(1, 1, 1, 1);
+		(geom as any).isSharedGeometry = true;
+		return geom;
+	})();
 
 	/**
 	 * Base geometry shared across all the nodes.
@@ -101,8 +105,8 @@ export class MapHeightNode extends MapNode {
 	 * @returns Returns a promise indicating when the geometry generation has finished.
 	 */
 	public async loadHeightGeometry(): Promise<any> {
-		if (this.mapView.heightProvider === null) {
-			throw new Error('GeoThree: MapView.heightProvider provider is null.');
+		if (!this.mapView || this.mapView.heightProvider === null) {
+			return;
 		}
 
 		if (this.level < this.mapView.heightProvider.minZoom || this.level > this.mapView.heightProvider.maxZoom) {
@@ -127,7 +131,11 @@ export class MapHeightNode extends MapNode {
 
 			const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
 
+			const oldGeometry = this.geometry;
 			this.geometry = new MapNodeHeightGeometry(1, 1, this.geometrySize, this.geometrySize, true, 10.0, imageData, true);
+			if (oldGeometry && !(oldGeometry as any).isSharedGeometry && oldGeometry !== MapHeightNode.geometry && oldGeometry !== MapPlaneNode.baseGeometry) {
+				oldGeometry.dispose();
+			}
 		}
 		catch (e) {
 			if (this.disposed) {

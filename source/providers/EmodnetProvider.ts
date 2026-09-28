@@ -89,7 +89,7 @@ export class EmodnetProvider extends MapProvider {
 		return url + params.toString();
 	}
 
-	public fetchTile(zoom: number, x: number, y: number): Promise<HTMLImageElement> {
+	public fetchTile(zoom: number, x: number, y: number): Promise<HTMLImageElement | HTMLCanvasElement> {
 		return XHRUtils.fetchImage(this.getTileUrl(zoom, x, y));
 	}
 }

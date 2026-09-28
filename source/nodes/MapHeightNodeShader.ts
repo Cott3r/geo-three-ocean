@@ -1,4 +1,4 @@
-import {BufferGeometry, Intersection, LinearFilter, Material, MeshPhongMaterial, NearestFilter, Raycaster, RGBAFormat, Texture, Vector3} from 'three';
+import {BufferGeometry, Intersection, Material, MeshPhongMaterial, NearestFilter, NoColorSpace, Raycaster, RGBAFormat, Texture, Vector3} from 'three';
 import {MapHeightNode} from './MapHeightNode';
 import {MapNodeGeometry} from '../geometries/MapNodeGeometry';
 import {MapPlaneNode} from './MapPlaneNode';
@@ -26,7 +26,7 @@ export class MapHeightNodeShader extends MapHeightNode
 	 * 
 	 * This tile sets the height to sea level where it is common for the data sources to be missing height data.
 	 */
-	public static defaultHeightTexture = TextureUtils.createFillTexture('#0186C0');
+	public static defaultHeightTexture = TextureUtils.createFillTexture('#0186C0', 1, 1, NoColorSpace);
 
 	/**
 	 * Size of the grid of the geometry displayed on the scene for each tile.
@@ -36,7 +36,11 @@ export class MapHeightNodeShader extends MapHeightNode
 	/**
 	 * Map node plane geometry.
 	 */
-	public static geometry: BufferGeometry = new MapNodeGeometry(1.0, 1.0, MapHeightNodeShader.geometrySize, MapHeightNodeShader.geometrySize, true);
+	public static geometry: BufferGeometry = (() => {
+		const geom = new MapNodeGeometry(1.0, 1.0, MapHeightNodeShader.geometrySize, MapHeightNodeShader.geometrySize, true);
+		(geom as any).isSharedGeometry = true;
+		return geom;
+	})();
 
 	/**
 	 * Base geometry of the map node.
@@ -68,7 +72,7 @@ export class MapHeightNodeShader extends MapHeightNode
 
 		material.onBeforeCompile = (shader) => 
 		{
-			// Pass uniforms from userData to the
+			// Pass uniforms from userData to the shader
 			for (const i in material.userData) 
 			{
 				shader.uniforms[i] = material.userData[i];
@@ -80,18 +84,35 @@ export class MapHeightNodeShader extends MapHeightNode
 			uniform sampler2D heightMap;
 			` + shader.vertexShader;
 
-			// Vertex depth logic
-			shader.vertexShader = shader.vertexShader.replace('#include <fog_vertex>', `
-			#include <fog_vertex>
-	
-			// Calculate height of the title
-			vec4 _theight = texture2D(heightMap, vMapUv);
+			// Displace transformed vertex in the standard Three.js pipeline at <begin_vertex>
+			// so logdepthbuf, projection, shadows, fog, and clipping work seamlessly
+			const displacementLogic = `
+			#include <begin_vertex>
+
+			#ifdef USE_MAP
+				vec2 _heightUv = vMapUv;
+			#else
+				vec2 _heightUv = uv;
+			#endif
+			vec4 _theight = texture2D(heightMap, _heightUv);
 			float _height = ((_theight.r * 255.0 * 65536.0 + _theight.g * 255.0 * 256.0 + _theight.b * 255.0) * 0.1) - 10000.0;
-			vec3 _transformed = position + _height * normal;
-	
-			// Vertex position based on height
-			gl_Position = projectionMatrix * modelViewMatrix * vec4(_transformed, 1.0);
-			`);
+			transformed += normal * _height;
+			`;
+
+			if (shader.vertexShader.includes('#include <begin_vertex>')) 
+			{
+				shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', displacementLogic);
+			} 
+			else 
+			{
+				shader.vertexShader = shader.vertexShader.replace('#include <fog_vertex>', `
+				#include <fog_vertex>
+				vec4 _theight = texture2D(heightMap, uv);
+				float _height = ((_theight.r * 255.0 * 65536.0 + _theight.g * 255.0 * 256.0 + _theight.b * 255.0) * 0.1) - 10000.0;
+				vec3 _transformed = position + _height * normal;
+				gl_Position = projectionMatrix * modelViewMatrix * vec4(_transformed, 1.0);
+				`);
+			}
 		};
 
 		return material;
@@ -106,10 +127,9 @@ export class MapHeightNodeShader extends MapHeightNode
 
 	public async loadHeightGeometry(): Promise<void> 
 	{
-		
-		if (this.mapView.heightProvider === null) 
+		if (!this.mapView || this.mapView.heightProvider === null) 
 		{
-			throw new Error('GeoThree: MapView.heightProvider provider is null.');
+			return;
 		}
 
 		if (this.level < this.mapView.heightProvider.minZoom || this.level > this.mapView.heightProvider.maxZoom)
@@ -133,12 +153,20 @@ export class MapHeightNodeShader extends MapHeightNode
 			}
 			
 			const texture = new Texture(image as any);
+			texture.colorSpace = NoColorSpace;
 			texture.generateMipmaps = false;
 			texture.format = RGBAFormat;
 			texture.magFilter = NearestFilter;
 			texture.minFilter = NearestFilter;
 			texture.needsUpdate = true;
 			
+			// @ts-ignore
+			const oldTexture = this.material.userData?.heightMap?.value;
+			if (oldTexture && oldTexture !== MapHeightNodeShader.defaultHeightTexture && typeof oldTexture.dispose === 'function')
+			{
+				oldTexture.dispose();
+			}
+
 			// @ts-ignore
 			this.material.userData.heightMap.value = texture;
 		}
@@ -181,13 +209,24 @@ export class MapHeightNodeShader extends MapHeightNode
 
 	public dispose(): void
 	{
-		super.dispose();
+		if (this.disposed)
+		{
+			return;
+		}
 
 		// @ts-ignore
-		if (this.material.userData.heightMap.value && this.material.userData.heightMap.value !== MapHeightNodeShader.defaultHeightTexture)
+		if (this.material && this.material.userData?.heightMap?.value)
 		{
 			// @ts-ignore
-			this.material.userData.heightMap.value.dispose();
+			const hm = this.material.userData.heightMap.value;
+			if (hm && hm !== MapHeightNodeShader.defaultHeightTexture && typeof hm.dispose === 'function')
+			{
+				hm.dispose();
+				// @ts-ignore
+				this.material.userData.heightMap.value = null;
+			}
 		}
+
+		super.dispose();
 	}
 }

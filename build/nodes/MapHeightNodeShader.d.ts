@@ -2,7 +2,7 @@ import { BufferGeometry, Intersection, Material, Raycaster, Texture, Vector3 } f
 import { MapHeightNode } from './MapHeightNode';
 import { MapView } from '../MapView';
 export declare class MapHeightNodeShader extends MapHeightNode {
-    static defaultHeightTexture: Texture;
+    static defaultHeightTexture: Texture<unknown, import("three").TextureEventMap>;
     static geometrySize: number;
     static geometry: BufferGeometry;
     static baseGeometry: BufferGeometry;

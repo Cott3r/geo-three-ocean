@@ -8,7 +8,7 @@ export declare class QuadTreePosition {
     static bottomRight: number;
 }
 export declare abstract class MapNode extends Mesh {
-    static defaultTexture: Texture;
+    static defaultTexture: Texture<unknown, import("three").TextureEventMap>;
     mapView: MapView;
     parentNode: MapNode;
     location: number;
